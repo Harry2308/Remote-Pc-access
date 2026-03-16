@@ -1,0 +1,110 @@
+.shell-container {
+  height: 100vh;
+  background: #121212;
+}
+
+.sidenav {
+  width: 240px;
+  background: #1a1a2e;
+  border-right: 1px solid #2a2a3e;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidenav-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 16px 12px;
+  color: #90caf9;
+
+  .logo-icon { font-size: 28px; width: 28px; height: 28px; }
+  .logo-text  { font-size: 1.15rem; font-weight: 600; letter-spacing: 0.5px; }
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 20px 14px;
+}
+
+.status-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  &.online  { background: #4caf50; box-shadow: 0 0 6px #4caf50; }
+  &.offline { background: #f44336; box-shadow: 0 0 6px #f44336; }
+}
+
+.status-label { font-size: 0.78rem; color: #888; }
+
+mat-nav-list {
+  padding-top: 4px;
+
+  a.mat-mdc-list-item {
+    border-radius: 8px;
+    margin: 2px 8px;
+    color: #bbb;
+    transition: background 0.15s, color 0.15s;
+
+    mat-icon { color: #888; transition: color 0.15s; }
+
+    &:hover {
+      background: rgba(144, 202, 249, 0.08);
+      color: #fff;
+      mat-icon { color: #90caf9; }
+    }
+  }
+
+  a.active-link {
+    background: rgba(144, 202, 249, 0.15);
+    color: #90caf9;
+    mat-icon { color: #90caf9; }
+  }
+
+  .logout-item {
+    color: #ef5350;
+    cursor: pointer;
+    mat-icon { color: #ef5350; }
+    &:hover { background: rgba(239, 83, 80, 0.1); }
+  }
+}
+
+.sidenav-spacer { flex: 1; }
+
+mat-divider { border-color: #2a2a3e; }
+
+// ─── Top toolbar ─────────────────────────────────────────────────────────────
+
+.top-bar {
+  height: 52px;
+  min-height: 52px;
+  background: #1a1a2e;
+  border-bottom: 1px solid #2a2a3e;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+
+  .toolbar-title  { font-size: 1rem; font-weight: 500; margin-left: 4px; }
+  .toolbar-spacer { flex: 1; }
+}
+
+.status-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.78rem;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-weight: 500;
+
+  mat-icon { font-size: 14px; width: 14px; height: 14px; }
+
+  &.online  { background: rgba(76, 175, 80, 0.15);  color: #4caf50; }
+  &.offline { background: rgba(244, 67, 54, 0.15);  color: #f44336; }
+}
+
+// ─── Content area ─────────────────────────────────────────────────────────────
+
+.content-area { display: flex; flex-direction: column; background: #121212; }
+
+.page-content { flex: 1; overflow-y: auto; }

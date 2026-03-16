@@ -1,0 +1,11 @@
+<div class="terminal-page">
+  <div class="term-header">
+    <span class="status-chip" [class.connected]="connected" [class.disconnected]="!connected">
+      <mat-icon>{{ connected ? 'check_circle' : 'cancel' }}</mat-icon>
+      {{ connected ? 'Connected' : 'Disconnected' }}
+    </span>
+  </div>
+  <div class="term-wrapper">
+    <div #termContainer class="term-container"></div>
+  </div>
+</div>

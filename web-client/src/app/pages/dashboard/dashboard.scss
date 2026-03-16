@@ -1,0 +1,100 @@
+.dashboard-content {
+  max-width: 800px;
+  margin: 16px auto;
+  padding: 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-bottom: 32px;
+}
+
+.status-card { background: #1e1e1e; }
+
+.refresh-btn { margin-left: auto; }
+
+.status-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.status-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  &.online  { background: #4caf50; box-shadow: 0 0 6px #4caf50; }
+  &.offline { background: #f44336; box-shadow: 0 0 6px #f44336; }
+}
+
+.meta { color: #888; font-size: 0.85rem; display: flex; gap: 4px; }
+.sep  { color: #555; }
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.stat-card {
+  background: #1e1e1e;
+
+  .stat-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    font-weight: 500;
+    mat-icon { font-size: 18px; width: 18px; height: 18px; color: #90caf9; }
+    .stat-value { margin-left: auto; font-weight: 700; font-size: 1.1rem; }
+  }
+
+  .stat-sub {
+    margin: 6px 0 0;
+    font-size: 0.78rem;
+    color: #888;
+  }
+}
+
+.power-card {
+  background: #1e1e1e;
+  mat-card-title { display: flex; align-items: center; gap: 8px; mat-icon { color: #90caf9; } }
+}
+
+.power-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 8px;
+  button {
+    display: flex; align-items: center; gap: 6px;
+    mat-spinner { display: inline-flex; }
+  }
+}
+
+.proc-card {
+  background: #1e1e1e;
+
+  .proc-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    th {
+      text-align: left;
+      padding: 6px 8px;
+      color: #90caf9;
+      border-bottom: 1px solid #333;
+    }
+    td {
+      padding: 4px 8px;
+      color: #ccc;
+      border-bottom: 1px solid #2a2a2a;
+    }
+    tr:last-child td { border-bottom: none; }
+  }
+}

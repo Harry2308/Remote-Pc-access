@@ -1,0 +1,124 @@
+<div class="files-page">
+
+  <!-- Top bar -->
+  <div class="files-topbar">
+
+    <div class="nav-row">
+      <!-- Back/up -->
+      <button mat-icon-button (click)="goUp()" [disabled]="isDriveRoot() || loading" title="Up one level">
+        <mat-icon>arrow_upward</mat-icon>
+      </button>
+
+      <!-- Breadcrumbs -->
+      <div class="breadcrumbs">
+        <ng-container *ngFor="let crumb of breadcrumbs; let last = last">
+          <button mat-button class="crumb" [class.crumb-last]="last" (click)="navigate(crumb.path)">
+            {{ crumb.label }}
+          </button>
+          <mat-icon class="crumb-sep" *ngIf="!last">chevron_right</mat-icon>
+        </ng-container>
+      </div>
+
+      <!-- Refresh -->
+      <button mat-icon-button (click)="refresh()" [disabled]="loading" title="Refresh">
+        <mat-icon>refresh</mat-icon>
+      </button>
+    </div>
+
+    <div class="action-row">
+      <!-- Drive selector -->
+      <button mat-stroked-button *ngFor="let drive of drives"
+        (click)="navigate(drive)"
+        [class.drive-active]="currentPath.toUpperCase().startsWith(drive[0].toUpperCase())"
+        class="drive-btn">
+        <mat-icon>storage</mat-icon>{{ drive }}
+      </button>
+
+      <span class="spacer"></span>
+
+      <button mat-stroked-button (click)="startCreateFolder()" [disabled]="loading">
+        <mat-icon>create_new_folder</mat-icon> New Folder
+      </button>
+      <button mat-raised-button color="primary" (click)="triggerUpload()" [disabled]="uploading || loading">
+        <mat-spinner *ngIf="uploading" diameter="16"></mat-spinner>
+        <mat-icon *ngIf="!uploading">upload_file</mat-icon>
+        {{ uploading ? 'Uploading…' : 'Upload' }}
+      </button>
+      <input #uploadInput type="file" multiple hidden (change)="onFilesSelected($event)">
+    </div>
+  </div>
+
+  <!-- New folder inline input -->
+  <div *ngIf="creatingFolder" class="inline-row">
+    <mat-icon style="color:#f9a825">folder</mat-icon>
+    <input class="inline-input" [(ngModel)]="newFolderName" placeholder="Folder name" autofocus
+      (keydown.enter)="confirmCreateFolder()" (keydown.escape)="cancelCreateFolder()">
+    <button mat-icon-button color="primary" (click)="confirmCreateFolder()"><mat-icon>check</mat-icon></button>
+    <button mat-icon-button (click)="cancelCreateFolder()"><mat-icon>close</mat-icon></button>
+  </div>
+
+  <!-- Loading bar -->
+  <mat-progress-bar *ngIf="loading" mode="indeterminate"></mat-progress-bar>
+
+  <!-- File list -->
+  <div class="file-list" *ngIf="listing && !loading">
+
+    <!-- Column headers -->
+    <div class="list-header">
+      <span class="col-icon"></span>
+      <span class="col-name">Name</span>
+      <span class="col-size">Size</span>
+      <span class="col-date">Modified</span>
+      <span class="col-actions"></span>
+    </div>
+
+    <!-- Rows -->
+    <div *ngFor="let item of listing.items"
+      class="list-row"
+      [class.is-dir]="item.isDirectory"
+      (click)="openItem(item)">
+
+      <!-- Icon -->
+      <span class="col-icon">
+        <mat-icon [style.color]="getFileIconColor(item)">{{ getFileIcon(item) }}</mat-icon>
+      </span>
+
+      <!-- Name / rename input -->
+      <span class="col-name" *ngIf="renaming?.path !== item.path">
+        {{ item.name }}
+      </span>
+      <span class="col-name rename-col" *ngIf="renaming?.path === item.path" (click)="$event.stopPropagation()">
+        <input class="rename-input" [(ngModel)]="renameValue" autofocus
+          (keydown.enter)="confirmRename()" (keydown.escape)="cancelRename()">
+        <button mat-icon-button color="primary" (click)="confirmRename()"><mat-icon>check</mat-icon></button>
+        <button mat-icon-button (click)="cancelRename()"><mat-icon>close</mat-icon></button>
+      </span>
+
+      <!-- Size -->
+      <span class="col-size">{{ item.isDirectory ? '' : formatSize(item.size) }}</span>
+
+      <!-- Date -->
+      <span class="col-date">{{ formatDate(item.modified) }}</span>
+
+      <!-- Actions -->
+      <span class="col-actions" (click)="$event.stopPropagation()">
+        <button mat-icon-button *ngIf="!item.isDirectory"
+          (click)="download(item, $event)"
+          [disabled]="downloadingPath === item.path"
+          title="Download to laptop">
+          <mat-spinner *ngIf="downloadingPath === item.path" diameter="16"></mat-spinner>
+          <mat-icon *ngIf="downloadingPath !== item.path">download</mat-icon>
+        </button>
+        <button mat-icon-button (click)="startRename(item, $event)" title="Rename"><mat-icon>edit</mat-icon></button>
+        <button mat-icon-button color="warn" (click)="deleteItem(item, $event)" title="Delete"><mat-icon>delete</mat-icon></button>
+      </span>
+    </div>
+
+    <!-- Empty state -->
+    <div *ngIf="listing.items.length === 0" class="empty-state">
+      <mat-icon>folder_open</mat-icon>
+      <p>This folder is empty</p>
+    </div>
+  </div>
+
+</div>

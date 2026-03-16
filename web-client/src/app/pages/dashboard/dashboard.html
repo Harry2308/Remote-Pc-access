@@ -1,0 +1,114 @@
+<div class="dashboard-content">
+
+  <!-- Status + uptime -->
+  <mat-card class="status-card">
+    <mat-card-content class="status-row">
+      <div class="status-indicator">
+        <span class="status-dot" [class.online]="status?.agentConnected" [class.offline]="!status?.agentConnected"></span>
+        <span>{{ status?.agentConnected ? 'Online' : 'Offline' }}</span>
+        <mat-spinner *ngIf="loading" diameter="16"></mat-spinner>
+      </div>
+      <div *ngIf="sysinfo" class="meta">
+        <span>{{ sysinfo.hostname }}</span>
+        <span class="sep">·</span>
+        <span>Up {{ formatUptime(sysinfo.uptime) }}</span>
+      </div>
+      <button mat-icon-button (click)="refreshStatus()" title="Refresh" class="refresh-btn">
+        <mat-icon>refresh</mat-icon>
+      </button>
+    </mat-card-content>
+  </mat-card>
+
+  <!-- Power controls -->
+  <mat-card class="power-card">
+    <mat-card-header><mat-card-title><mat-icon>power_settings_new</mat-icon> Power</mat-card-title></mat-card-header>
+    <mat-card-content class="power-buttons">
+      <button mat-raised-button color="accent" (click)="wake()" [disabled]="!!actionInProgress"
+        title="Wake the PC via Wake-on-LAN">
+        <mat-spinner *ngIf="actionInProgress === 'wake'" diameter="16"></mat-spinner>
+        <mat-icon *ngIf="actionInProgress !== 'wake'">power</mat-icon>
+        Wake
+      </button>
+      <button mat-raised-button (click)="sleep()" [disabled]="!!actionInProgress || !status?.agentConnected"
+        title="Put the PC to sleep (S3)">
+        <mat-spinner *ngIf="actionInProgress === 'sleep'" diameter="16"></mat-spinner>
+        <mat-icon *ngIf="actionInProgress !== 'sleep'">bedtime</mat-icon>
+        Sleep
+      </button>
+      <button mat-raised-button (click)="restart()" [disabled]="!!actionInProgress || !status?.agentConnected"
+        title="Restart the PC">
+        <mat-spinner *ngIf="actionInProgress === 'restart'" diameter="16"></mat-spinner>
+        <mat-icon *ngIf="actionInProgress !== 'restart'">restart_alt</mat-icon>
+        Restart
+      </button>
+      <button mat-raised-button color="warn" (click)="shutdown()" [disabled]="!!actionInProgress || !status?.agentConnected"
+        title="Shut down the PC">
+        <mat-spinner *ngIf="actionInProgress === 'shutdown'" diameter="16"></mat-spinner>
+        <mat-icon *ngIf="actionInProgress !== 'shutdown'">power_settings_new</mat-icon>
+        Shutdown
+      </button>
+    </mat-card-content>
+  </mat-card>
+
+  <!-- System stats -->
+  <div *ngIf="sysinfo" class="stats-grid">
+
+    <mat-card class="stat-card">
+      <mat-card-content>
+        <div class="stat-header">
+          <mat-icon>memory</mat-icon>
+          <span>CPU</span>
+          <span class="stat-value">{{ sysinfo.cpu.usagePercent }}%</span>
+        </div>
+        <mat-progress-bar mode="determinate" [value]="sysinfo.cpu.usagePercent"
+          [color]="sysinfo.cpu.usagePercent > 80 ? 'warn' : 'primary'"></mat-progress-bar>
+        <p class="stat-sub">{{ sysinfo.cpu.cores }} cores · {{ sysinfo.cpu.model | slice:0:30 }}</p>
+      </mat-card-content>
+    </mat-card>
+
+    <mat-card class="stat-card">
+      <mat-card-content>
+        <div class="stat-header">
+          <mat-icon>storage</mat-icon>
+          <span>RAM</span>
+          <span class="stat-value">{{ sysinfo.ram.usagePercent }}%</span>
+        </div>
+        <mat-progress-bar mode="determinate" [value]="sysinfo.ram.usagePercent"
+          [color]="sysinfo.ram.usagePercent > 85 ? 'warn' : 'primary'"></mat-progress-bar>
+        <p class="stat-sub">{{ sysinfo.ram.usedGB }} / {{ sysinfo.ram.totalGB }} GB used</p>
+      </mat-card-content>
+    </mat-card>
+
+    <mat-card class="stat-card" *ngFor="let disk of sysinfo.disks">
+      <mat-card-content>
+        <div class="stat-header">
+          <mat-icon>hard_drive</mat-icon>
+          <span>{{ disk.drive }}</span>
+          <span class="stat-value">{{ disk.usagePercent }}%</span>
+        </div>
+        <mat-progress-bar mode="determinate" [value]="disk.usagePercent"
+          [color]="disk.usagePercent > 90 ? 'warn' : 'accent'"></mat-progress-bar>
+        <p class="stat-sub">{{ disk.usedGB }} / {{ disk.totalGB }} GB used</p>
+      </mat-card-content>
+    </mat-card>
+
+  </div>
+
+  <!-- Top processes -->
+  <mat-card *ngIf="sysinfo?.processes?.length" class="proc-card">
+    <mat-card-header><mat-card-title>Top Processes</mat-card-title></mat-card-header>
+    <mat-card-content>
+      <table class="proc-table">
+        <thead><tr><th>Name</th><th>PID</th><th>RAM (MB)</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let p of sysinfo!.processes.slice(0, 10)">
+            <td>{{ p.name }}</td>
+            <td>{{ p.pid }}</td>
+            <td>{{ p.memMB }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </mat-card-content>
+  </mat-card>
+
+</div>

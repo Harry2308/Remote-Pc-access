@@ -1,0 +1,56 @@
+<div class="chat-page">
+
+  <!-- Chat header -->
+  <div class="chat-header">
+    <mat-icon>smart_toy</mat-icon>
+    <select class="model-select" [(ngModel)]="selectedModel" [disabled]="streaming">
+      <option *ngFor="let m of models" [value]="m">{{ m }}</option>
+      <option *ngIf="!models.length" value="llama3.2:3b">llama3.2:3b</option>
+    </select>
+    <span class="status-chip" [class.connected]="connected" [class.disconnected]="!connected">
+      {{ connected ? 'Ready' : 'Offline' }}
+    </span>
+    <button mat-icon-button (click)="clearChat()" title="Clear chat" [disabled]="streaming">
+      <mat-icon>delete_sweep</mat-icon>
+    </button>
+  </div>
+
+  <!-- Messages -->
+  <div class="messages-container">
+    <div *ngIf="messages.length === 0" class="empty-state">
+      <mat-icon>smart_toy</mat-icon>
+      <p>Ask anything — running locally on your PC via Ollama.</p>
+      <p class="hint">Model: <strong>{{ selectedModel }}</strong></p>
+    </div>
+
+    <div *ngFor="let msg of messages" class="message-row" [class.user]="msg.role === 'user'" [class.assistant]="msg.role === 'assistant'">
+      <div class="bubble">
+        <span class="role-label">{{ msg.role === 'user' ? 'You' : '🤖 AI' }}</span>
+        <pre class="content">{{ msg.content }}<span *ngIf="msg.streaming" class="cursor">▌</span></pre>
+      </div>
+    </div>
+
+    <div #messagesEnd></div>
+  </div>
+
+  <!-- Input -->
+  <div class="input-area">
+    <textarea
+      [(ngModel)]="input"
+      (keydown)="onKeydown($event)"
+      placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
+      rows="2"
+      [disabled]="!connected"
+      class="chat-input"
+    ></textarea>
+    <div class="input-actions">
+      <button mat-raised-button color="warn" *ngIf="streaming" (click)="stopStream()">
+        <mat-icon>stop</mat-icon> Stop
+      </button>
+      <button mat-raised-button color="primary" *ngIf="!streaming" (click)="send()" [disabled]="!input.trim() || !connected">
+        <mat-icon>send</mat-icon> Send
+      </button>
+    </div>
+  </div>
+
+</div>

@@ -1,0 +1,17 @@
+[
+  {
+    "name": "notepad",
+    "command": "notepad.exe",
+    "description": "Open Notepad"
+  },
+  {
+    "name": "claude",
+    "command": "claude",
+    "description": "Start Claude Code in current directory"
+  },
+  {
+    "name": "explorer",
+    "command": "explorer.exe",
+    "description": "Open Windows Explorer"
+  }
+]
