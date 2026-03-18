@@ -249,7 +249,8 @@ Start with Cloudflare Tunnel for zero-cost setup. Migrate to self-hosted FRP if 
 ---
 
 ## Future Extensions
-- Screen sharing (WebRTC + Windows Desktop Duplication API via Rust/C++ native module)
+- Screen sharing Phase 2: FFmpeg H.264 + MSE for lower bandwidth / higher quality
+- Screen sharing Phase 3: Mouse + keyboard input injection (interactive remote desktop)
 - File browser / upload / download
 - Mobile native app wrapper (Capacitor or React Native WebView)
 - Multiple PC support

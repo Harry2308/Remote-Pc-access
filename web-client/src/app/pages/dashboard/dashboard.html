@@ -79,6 +79,24 @@
       </mat-card-content>
     </mat-card>
 
+    <!-- GPU -->
+    <mat-card class="stat-card" *ngIf="sysinfo.gpu">
+      <mat-card-content>
+        <div class="stat-header">
+          <mat-icon>videogame_asset</mat-icon>
+          <span>GPU</span>
+          <span class="stat-value">{{ sysinfo.gpu!.usagePercent }}%</span>
+        </div>
+        <mat-progress-bar mode="determinate" [value]="sysinfo.gpu!.usagePercent"
+          [color]="sysinfo.gpu!.usagePercent > 90 ? 'warn' : 'accent'"></mat-progress-bar>
+        <p class="stat-sub">
+          VRAM {{ sysinfo.gpu!.memUsedMB | number:'1.0-0' }} / {{ sysinfo.gpu!.memTotalMB | number:'1.0-0' }} MB
+          <span *ngIf="sysinfo.gpu!.temperatureC !== null"> · {{ sysinfo.gpu!.temperatureC }}°C</span>
+        </p>
+        <p class="stat-sub" style="opacity:0.5; font-size:0.72rem">{{ sysinfo.gpu!.name | slice:0:36 }}</p>
+      </mat-card-content>
+    </mat-card>
+
     <mat-card class="stat-card" *ngFor="let disk of sysinfo.disks">
       <mat-card-content>
         <div class="stat-header">

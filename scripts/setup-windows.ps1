@@ -2,7 +2,13 @@
 # Run this on the Windows PC via SSH:
 #   ssh unger@192.168.0.137 "powershell -ExecutionPolicy Bypass -File D:\remote-pc-access\scripts\setup-windows.ps1"
 #
-# Or paste directly into the SSH PowerShell session.
+# Flags (passed by run.sh based on hash comparison):
+#   -SkipNpmInstall   skip npm install (package.json unchanged)
+#   -SkipBuild        skip tsc build   (source unchanged)
+param(
+    [switch]$SkipNpmInstall,
+    [switch]$SkipBuild
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -104,16 +110,21 @@ if (Test-Command "nssm") {
 # 6. Install pc-agent npm dependencies
 $agentDir = "D:\remote-pc-access\pc-agent"
 if (Test-Path "$agentDir\package.json") {
-    Info "Installing pc-agent npm dependencies (compiles node-pty - may take 2-3 min)..."
-    Push-Location $agentDir
-    npm install
-    if ($LASTEXITCODE -ne 0) {
-        Err "npm install failed in pc-agent"
+    $needsInstall = (-not $SkipNpmInstall) -or (-not (Test-Path "$agentDir\node_modules"))
+    if ($needsInstall) {
+        Info "Installing pc-agent npm dependencies (compiles node-pty - may take 2-3 min)..."
+        Push-Location $agentDir
+        npm install
+        if ($LASTEXITCODE -ne 0) {
+            Err "npm install failed in pc-agent"
+            Pop-Location
+            exit 1
+        }
         Pop-Location
-        exit 1
+        Success "pc-agent dependencies installed"
+    } else {
+        Success "pc-agent dependencies unchanged - skipping npm install"
     }
-    Pop-Location
-    Success "pc-agent dependencies installed"
 } else {
     Warn "pc-agent not found at $agentDir - skipping npm install"
     Warn "Copy the pc-agent folder to D:\remote-pc-access\pc-agent and re-run this script"
@@ -121,11 +132,16 @@ if (Test-Path "$agentDir\package.json") {
 
 # 7. Build pc-agent TypeScript
 if (Test-Path "$agentDir\package.json") {
-    Info "Building pc-agent TypeScript..."
-    Push-Location $agentDir
-    npm run build
-    Pop-Location
-    Success "pc-agent built successfully"
+    $needsBuild = (-not $SkipBuild) -or (-not (Test-Path "$agentDir\dist\index.js"))
+    if ($needsBuild) {
+        Info "Building pc-agent TypeScript..."
+        Push-Location $agentDir
+        npm run build
+        Pop-Location
+        Success "pc-agent built successfully"
+    } else {
+        Success "pc-agent source unchanged - skipping tsc build"
+    }
 }
 
 # 8. Create .env from .env.example if not present
@@ -139,53 +155,53 @@ if (Test-Path "$agentDir\.env.example") {
     }
 }
 
-# 9. Install pc-agent as Windows Service via NSSM
-$serviceName = "RemotePCAgent"
-$nodeExe     = (Get-Command node).Source
+# 9. Remove legacy NSSM service if present (migrating to Scheduled Task)
+$taskName    = "RemotePCAgent"
+$nssmExe     = "C:\Windows\System32\nssm.exe"
+$nodeCmd     = Get-Command node -ErrorAction SilentlyContinue
+$nodeExe     = if ($nodeCmd) { $nodeCmd.Source } else { $null }
 $agentScript = "$agentDir\dist\index.js"
 
-if (Test-Path $agentScript) {
-    $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-    if ($existingService) {
-        Warn "Service '$serviceName' already exists - stopping and removing to reinstall..."
-        $prev = $ErrorActionPreference
-        $ErrorActionPreference = "Continue"
-        nssm stop $serviceName 2>$null | Out-Null
-        nssm remove $serviceName confirm 2>$null | Out-Null
-        $ErrorActionPreference = $prev
-    }
+$legacyService = Get-Service -Name $taskName -ErrorAction SilentlyContinue
+if ($legacyService -and (Test-Path $nssmExe)) {
+    Info "Removing legacy NSSM service (switching to Scheduled Task for interactive desktop access)..."
+    $prev = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+    & $nssmExe stop $taskName confirm 2>$null | Out-Null
+    Start-Sleep -Seconds 1
+    & $nssmExe remove $taskName confirm 2>$null | Out-Null
+    $ErrorActionPreference = $prev
+    Success "NSSM service removed"
+}
 
-    Info "Registering '$serviceName' Windows Service..."
-    nssm install $serviceName $nodeExe $agentScript
-    nssm set $serviceName AppDirectory $agentDir
-    nssm set $serviceName DisplayName "Remote PC Access Agent"
-    nssm set $serviceName Description "Connects to relay server and handles terminal/power/app commands"
-    nssm set $serviceName Start SERVICE_AUTO_START
-    nssm set $serviceName AppStdout "$agentDir\service.log"
-    nssm set $serviceName AppStderr "$agentDir\service-error.log"
-
-    # Pass .env variables to the service environment
-    if (Test-Path "$agentDir\.env") {
-        $envVars = Get-Content "$agentDir\.env" |
-                   Where-Object { $_ -match "^[A-Z_]+=.+" -and $_ -notmatch "^#" } |
-                   ForEach-Object { $_ -replace '"', '' }
-        foreach ($var in $envVars) {
-            $key, $val = $var -split "=", 2
-            nssm set $serviceName AppEnvironmentExtra "$key=$val"
-        }
-    }
-
-    Success "Service '$serviceName' registered"
-    Warn "IMPORTANT: Edit $agentDir\.env with your relay URL and secrets before starting the service"
-    Info "To start the service after editing .env:"
-    Info "  nssm start $serviceName"
-    Info "To check service status:"
-    Info "  nssm status $serviceName"
-    Info "To view logs:"
-    Info "  type $agentDir\service.log"
+# 10. Register/update as Scheduled Task (interactive session = full desktop access for screen capture)
+if ($nodeExe -and (Test-Path $agentScript)) {
+    Info "Registering '$taskName' as Scheduled Task (interactive session)..."
+    # Use a .bat wrapper to avoid cmd.exe /c quoting bug (multiple quoted args after /c are mishandled)
+    $logFile   = "$agentDir\service.log"
+    $batFile   = "$agentDir\start-agent.bat"
+    $batLines  = "@echo off", "cd /d `"$agentDir`"", "`"$nodeExe`" `"$agentScript`" >> `"$logFile`" 2>&1"
+    Set-Content -Path $batFile -Value ($batLines -join "`r`n") -Encoding ASCII
+    Info "Created start-agent.bat"
+    $action    = New-ScheduledTaskAction `
+                    -Execute "cmd.exe" `
+                    -Argument "/c `"$batFile`"" `
+                    -WorkingDirectory $agentDir
+    $trigger   = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+    $settings  = New-ScheduledTaskSettingsSet `
+                    -ExecutionTimeLimit 0 `
+                    -RestartCount 5 `
+                    -RestartInterval (New-TimeSpan -Minutes 1) `
+                    -StartWhenAvailable `
+                    -MultipleInstances IgnoreNew
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
+        -Settings $settings -Principal $principal -Force | Out-Null
+    Success "Task '$taskName' registered (runs at logon in interactive session)"
+    Info "To start manually:  Start-ScheduledTask -TaskName '$taskName'"
+    Info "To check status:    (Get-ScheduledTask -TaskName '$taskName').State"
+    Info "To view logs:       type $agentDir\service.log"
 } else {
-    Warn "pc-agent dist not found - service not registered yet"
-    Warn "After copying files and running npm run build, re-run this script to register the service"
+    Warn "node.exe or dist/index.js not found - task not registered"
 }
 
 # Done
@@ -193,5 +209,6 @@ Info ""
 Info "=== Setup complete ==="
 Info "Next steps:"
 Info "  1. Edit $agentDir\.env  (set RELAY_URL and AGENT_SECRET)"
-Info "  2. nssm start $serviceName"
-Info "  3. Check .logs/relay-server.log on your laptop to confirm agent connected"
+Info "  2. Log into Windows (physically or via RDP) - the task starts automatically at logon"
+Info "  3. Or start manually: Start-ScheduledTask -TaskName '$taskName'"
+Info "  4. Check .logs/relay-server.log on your laptop to confirm agent connected"

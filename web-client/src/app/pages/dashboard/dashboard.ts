@@ -1,8 +1,7 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { Router } from '@angular/router';
 import { MatSnackBar } from '@angular/material/snack-bar';
-import { interval, Subscription } from 'rxjs';
-import { switchMap, startWith } from 'rxjs/operators';
+import { Subscription } from 'rxjs';
 import { ApiService, StatusResponse } from '../../services/api';
 import { AuthService } from '../../services/auth';
 import { SysinfoService, SysInfo } from '../../services/sysinfo';
@@ -30,31 +29,17 @@ export class Dashboard implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.refreshStatus();
-
-    // Poll sysinfo every 10s when agent is connected
+    this.sysinfoService.connect();
     this.subs.add(
-      interval(10000).pipe(startWith(0)).subscribe(() => {
-        if (this.status?.agentConnected) this.fetchSysinfo();
-      })
+      this.sysinfoService.live$.subscribe((info) => (this.sysinfo = info))
     );
   }
 
   refreshStatus(): void {
     this.loading = true;
     this.api.getStatus().subscribe({
-      next: (s) => {
-        this.status = s;
-        this.loading = false;
-        if (s.agentConnected) this.fetchSysinfo();
-      },
+      next: (s) => { this.status = s; this.loading = false; },
       error: () => { this.loading = false; },
-    });
-  }
-
-  private fetchSysinfo(): void {
-    this.sysinfoService.get().subscribe({
-      next: (info) => (this.sysinfo = info),
-      error: () => {},
     });
   }
 
@@ -94,5 +79,6 @@ export class Dashboard implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.subs.unsubscribe();
+    this.sysinfoService.disconnect();
   }
 }

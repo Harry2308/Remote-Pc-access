@@ -1,0 +1,89 @@
+<div class="processes-page">
+
+  <!-- Header bar with summary stats + filter -->
+  <div class="header-row" *ngIf="sysinfo">
+    <div class="summary-chips">
+      <span class="chip cpu">
+        <mat-icon>memory</mat-icon>
+        CPU {{ sysinfo.cpu.usagePercent }}%
+        <span class="chip-bar">
+          <span class="chip-fill" [style.width.%]="sysinfo.cpu.usagePercent"
+            [class.warn]="sysinfo.cpu.usagePercent > 80"></span>
+        </span>
+      </span>
+      <span class="chip ram">
+        <mat-icon>storage</mat-icon>
+        RAM {{ sysinfo.ram.usedGB }} / {{ sysinfo.ram.totalGB }} GB
+        <span class="chip-bar">
+          <span class="chip-fill" [style.width.%]="sysinfo.ram.usagePercent"
+            [class.warn]="sysinfo.ram.usagePercent > 85"></span>
+        </span>
+      </span>
+      <span class="chip gpu" *ngIf="sysinfo.gpu">
+        <mat-icon>videogame_asset</mat-icon>
+        GPU {{ sysinfo.gpu!.usagePercent }}%
+        <span class="chip-bar">
+          <span class="chip-fill gpu-fill" [style.width.%]="sysinfo.gpu!.usagePercent"
+            [class.warn]="sysinfo.gpu!.usagePercent > 90"></span>
+        </span>
+      </span>
+    </div>
+
+    <mat-form-field class="filter-field" appearance="outline" subscriptSizing="dynamic">
+      <mat-icon matPrefix>search</mat-icon>
+      <input matInput [(ngModel)]="filter" placeholder="Filter processes…">
+    </mat-form-field>
+  </div>
+
+  <!-- Waiting for data -->
+  <div class="waiting" *ngIf="!sysinfo">
+    <mat-spinner diameter="36"></mat-spinner>
+    <p>Waiting for PC agent data…</p>
+  </div>
+
+  <!-- Process table -->
+  <div class="table-wrap" *ngIf="sysinfo">
+    <table class="proc-table">
+      <thead>
+        <tr>
+          <th class="col-name sortable" (click)="setSort('name')">
+            Name <mat-icon class="sort-icon">{{ sortIcon('name') }}</mat-icon>
+          </th>
+          <th class="col-pid">PID</th>
+          <th class="col-cpu sortable" (click)="setSort('cpuPercent')">
+            CPU % <mat-icon class="sort-icon">{{ sortIcon('cpuPercent') }}</mat-icon>
+          </th>
+          <th class="col-mem sortable" (click)="setSort('memMB')">
+            RAM (MB) <mat-icon class="sort-icon">{{ sortIcon('memMB') }}</mat-icon>
+          </th>
+          <th class="col-bar">Usage</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let p of processes; trackBy: trackByPid">
+          <td class="col-name">{{ p.name }}</td>
+          <td class="col-pid">{{ p.pid }}</td>
+          <td class="col-cpu" [class.high]="p.cpuPercent >= 20" [class.critical]="p.cpuPercent >= 50">
+            {{ p.cpuPercent | number:'1.1-1' }}%
+          </td>
+          <td class="col-mem">{{ p.memMB }}</td>
+          <td class="col-bar">
+            <div class="bar-wrap">
+              <div class="bar-cpu" [style.width.%]="p.cpuPercent"
+                [class.bar-warn]="p.cpuPercent >= 50"></div>
+            </div>
+          </td>
+        </tr>
+        <tr *ngIf="processes.length === 0">
+          <td colspan="5" class="empty">No processes match "{{ filter }}"</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="count" *ngIf="sysinfo">
+    Showing {{ processes.length }} of {{ sysinfo.processes.length }} processes
+    · updates every ~2s
+  </p>
+
+</div>

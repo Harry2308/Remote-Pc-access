@@ -34,10 +34,12 @@ import { Dashboard }  from './pages/dashboard/dashboard';
 import { Terminal }   from './pages/terminal/terminal';
 import { AiChat }     from './pages/ai-chat/ai-chat';
 import { Files }      from './pages/files/files';
+import { Screen }     from './pages/screen/screen';
+import { Processes }  from './pages/processes/processes';
 import { AuthInterceptor } from './interceptors/auth.interceptor';
 
 @NgModule({
-  declarations: [App, Shell, Login, Dashboard, Terminal, AiChat, Files],
+  declarations: [App, Shell, Login, Dashboard, Terminal, AiChat, Files, Screen, Processes],
   imports: [
     BrowserModule,
     BrowserAnimationsModule,

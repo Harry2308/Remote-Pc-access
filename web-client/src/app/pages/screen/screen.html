@@ -1,0 +1,53 @@
+<div class="screen-page">
+
+  <!-- Controls bar -->
+  <div class="controls-bar">
+    <div class="controls-left">
+      <span class="status-chip" [class.online]="connected" [class.offline]="!connected">
+        <mat-icon>{{ connected ? 'videocam' : 'videocam_off' }}</mat-icon>
+        {{ connected ? 'Live' : 'Disconnected' }}
+      </span>
+      <span class="stat-badge" *ngIf="connected">
+        <mat-icon>speed</mat-icon>{{ actualFps }} fps
+      </span>
+    </div>
+
+    <div class="controls-center">
+      <!-- FPS slider -->
+      <label class="ctrl-label">FPS</label>
+      <input type="range" min="1" max="30" step="1" [(ngModel)]="fps"
+        (change)="applySettings()" class="ctrl-range" title="Frames per second">
+      <span class="ctrl-val">{{ fps }}</span>
+
+      <!-- Quality slider -->
+      <label class="ctrl-label">Quality</label>
+      <input type="range" min="20" max="95" step="5" [(ngModel)]="quality"
+        (change)="applySettings()" class="ctrl-range" title="JPEG quality">
+      <span class="ctrl-val">{{ quality }}%</span>
+    </div>
+
+    <div class="controls-right">
+      <button mat-icon-button (click)="reconnect()" title="Reconnect">
+        <mat-icon>refresh</mat-icon>
+      </button>
+      <button mat-icon-button (click)="toggleFullscreen()" title="Fullscreen">
+        <mat-icon>{{ fullscreen ? 'fullscreen_exit' : 'fullscreen' }}</mat-icon>
+      </button>
+    </div>
+  </div>
+
+  <!-- Canvas view -->
+  <div class="canvas-wrapper">
+    <canvas #canvas class="screen-canvas"></canvas>
+
+    <!-- Offline overlay -->
+    <div class="offline-overlay" *ngIf="!connected">
+      <mat-icon>videocam_off</mat-icon>
+      <p>PC offline or agent not connected</p>
+      <button mat-raised-button color="primary" (click)="reconnect()">
+        <mat-icon>refresh</mat-icon> Reconnect
+      </button>
+    </div>
+  </div>
+
+</div>

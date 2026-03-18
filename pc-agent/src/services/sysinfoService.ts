@@ -4,6 +4,15 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
+export interface GpuInfo {
+  name: string;
+  usagePercent: number;
+  memTotalMB: number;
+  memUsedMB: number;
+  memUsagePercent: number;
+  temperatureC: number | null;
+}
+
 export interface SysInfo {
   cpu: {
     model: string;
@@ -17,6 +26,7 @@ export interface SysInfo {
     usagePercent: number;
   };
   disks: DiskInfo[];
+  gpu: GpuInfo | null;
   uptime: number; // seconds
   hostname: string;
   platform: string;
@@ -43,10 +53,11 @@ export class SysInfoService {
   private lastCpuTime = Date.now();
 
   async get(): Promise<SysInfo> {
-    const [cpuUsage, disks, processes] = await Promise.all([
+    const [cpuUsage, disks, processes, gpu] = await Promise.all([
       this.getCpuUsage(),
       this.getDiskInfo(),
       this.getProcesses(),
+      this.getGpuInfo(),
     ]);
 
     const totalMem = os.totalmem();
@@ -66,6 +77,7 @@ export class SysInfoService {
         usagePercent: round((usedMem / totalMem) * 100),
       },
       disks,
+      gpu,
       uptime:   os.uptime(),
       hostname: os.hostname(),
       platform: os.platform(),
@@ -130,26 +142,73 @@ export class SysInfoService {
     }
   }
 
-  private async getProcesses(): Promise<ProcessInfo[]> {
+  private async getGpuInfo(): Promise<GpuInfo | null> {
+    // Try NVIDIA first
     try {
       const { stdout } = await execAsync(
-        'tasklist /fo csv /nh',
-        { timeout: 5000 }
+        'nvidia-smi --query-gpu=name,utilization.gpu,memory.total,memory.used,temperature.gpu --format=csv,noheader,nounits',
+        { timeout: 3000 }
       );
+      const line = stdout.trim().split('\n')[0];
+      if (!line) return null;
+      const parts = line.split(',').map((p) => p.trim());
+      if (parts.length < 5) return null;
+      const [name, usagePct, memTotal, memUsed, tempStr] = parts;
+      const memTotalMB = parseInt(memTotal);
+      const memUsedMB  = parseInt(memUsed);
+      return {
+        name,
+        usagePercent:    parseInt(usagePct),
+        memTotalMB,
+        memUsedMB,
+        memUsagePercent: round((memUsedMB / memTotalMB) * 100),
+        temperatureC:    !isNaN(parseInt(tempStr)) ? parseInt(tempStr) : null,
+      };
+    } catch { /* nvidia-smi not available */ }
+
+    // Fallback: basic info via wmic (no usage stats — AMD / Intel / no driver)
+    try {
+      const { stdout } = await execAsync(
+        'wmic path Win32_VideoController get Name,AdapterRAM /format:csv',
+        { timeout: 3000 }
+      );
+      const lines = stdout.trim().split('\n').filter((l) => l.includes(',') && !/^Node/.test(l.trim()));
+      if (!lines.length) return null;
+      const parts = lines[0].trim().split(',');
+      if (parts.length < 3) return null;
+      const adapterRam  = parseInt(parts[1]?.trim() || '0');
+      const name        = parts[2]?.trim() || 'Unknown GPU';
+      const memTotalMB  = Math.round(adapterRam / (1024 * 1024));
+      return { name, usagePercent: 0, memTotalMB, memUsedMB: 0, memUsagePercent: 0, temperatureC: null };
+    } catch {
+      return null;
+    }
+  }
+
+  private async getProcesses(): Promise<ProcessInfo[]> {
+    try {
+      const cpuCount = os.cpus().length;
+      const { stdout } = await execAsync(
+        'wmic path Win32_PerfFormattedData_PerfProc_Process get IDProcess,Name,PercentProcessorTime,WorkingSet64 /format:csv',
+        { timeout: 6000 }
+      );
+      const lines = stdout.trim().split('\n').filter(l => l.includes(',') && !/^Node/i.test(l.trim()));
       const processes: ProcessInfo[] = [];
-      for (const line of stdout.trim().split('\n').slice(0, 20)) {
-        // CSV: "Name","PID","Session Name","Session#","Mem Usage"
-        const match = line.match(/"([^"]+)","(\d+)","[^"]+","[^"]+","([^"]+)"/);
-        if (!match) continue;
-        const memStr = match[3].replace(/[^0-9]/g, '');
-        processes.push({
-          name:       match[1],
-          pid:        parseInt(match[2]),
-          cpuPercent: 0, // tasklist doesn't include CPU% — would need wmic
-          memMB:      Math.round(parseInt(memStr) / 1024),
-        });
+      for (const line of lines) {
+        const parts = line.trim().split(',');
+        // CSV: Node, IDProcess, Name, PercentProcessorTime, WorkingSet64
+        if (parts.length < 5) continue;
+        const pid        = parseInt(parts[1]);
+        const name       = parts[2]?.trim();
+        const rawCpu     = parseFloat(parts[3]);
+        const memBytes   = parseInt(parts[4]);
+        if (!name || name === '_Total' || name === 'Idle' || isNaN(pid) || pid === 0) continue;
+        // Normalize to 0-100% across all cores (matches Task Manager)
+        const cpuPercent = Math.min(100, round(rawCpu / cpuCount));
+        processes.push({ pid, name, cpuPercent, memMB: Math.round(memBytes / (1024 * 1024)) });
       }
-      return processes.sort((a, b) => b.memMB - a.memMB).slice(0, 15);
+      // Sort by CPU first, then RAM
+      return processes.sort((a, b) => b.cpuPercent - a.cpuPercent || b.memMB - a.memMB).slice(0, 25);
     } catch {
       return [];
     }

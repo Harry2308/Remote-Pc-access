@@ -88,6 +88,30 @@ mat-divider { border-color: #2a2a3e; }
   .toolbar-spacer { flex: 1; }
 }
 
+.cpu-chip, .gpu-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.78rem;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-weight: 500;
+  margin-right: 6px;
+  mat-icon { font-size: 14px; width: 14px; height: 14px; }
+}
+
+.cpu-chip {
+  background: rgba(144, 202, 249, 0.1);
+  color: #90caf9;
+  &.cpu-warn { background: rgba(255, 152, 0, 0.15); color: #ff9800; }
+}
+
+.gpu-chip {
+  background: rgba(186, 104, 200, 0.12);
+  color: #ba68c8;
+  &.gpu-warn { background: rgba(255, 152, 0, 0.15); color: #ff9800; }
+}
+
 .status-chip {
   display: flex;
   align-items: center;

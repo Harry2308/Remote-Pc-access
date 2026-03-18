@@ -5,6 +5,16 @@ export interface OllamaMessage {
   content: string;
 }
 
+export interface ModelInfo {
+  name: string;
+  sizeGB: number;
+}
+
+export interface RunningModel {
+  name: string;
+  sizeVramMB: number;
+}
+
 export interface OllamaChatOptions {
   model: string;
   messages: OllamaMessage[];
@@ -18,14 +28,31 @@ export class OllamaService {
   // Active streaming requests — keyed by sessionId so they can be cancelled
   private activeStreams = new Map<string, AbortController>();
 
-  async listModels(): Promise<string[]> {
+  async listModels(): Promise<ModelInfo[]> {
     try {
       const res = await fetch(`${OLLAMA_BASE}/api/tags`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json() as { models: { name: string }[] };
-      return data.models.map((m) => m.name);
+      const data = await res.json() as { models: { name: string; size: number }[] };
+      return data.models.map((m) => ({
+        name:   m.name,
+        sizeGB: Math.round(m.size / 1e9 * 10) / 10,
+      }));
     } catch (err) {
       console.error('[ollama] Failed to list models:', err);
+      return [];
+    }
+  }
+
+  async getRunningModels(): Promise<RunningModel[]> {
+    try {
+      const res = await fetch(`${OLLAMA_BASE}/api/ps`);
+      if (!res.ok) return [];
+      const data = await res.json() as { models: { name: string; size_vram: number }[] };
+      return (data.models ?? []).map((m) => ({
+        name:       m.name,
+        sizeVramMB: Math.round(m.size_vram / (1024 * 1024)),
+      }));
+    } catch {
       return [];
     }
   }

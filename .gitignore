@@ -1,3 +1,6 @@
+# ─── Deploy hash cache (local build state, not source) ────────────────────────
+.deploy-hashes/
+
 # ─── Secrets — never commit real .env files ───────────────────────────────────
 .env
 !.env.example

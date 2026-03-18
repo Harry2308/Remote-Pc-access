@@ -1,0 +1,114 @@
+.screen-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 52px);
+  background: #0a0a0a;
+  overflow: hidden;
+}
+
+// ─── Controls bar ──────────────────────────────────────────────────────────────
+
+.controls-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 14px;
+  background: #1a1a2e;
+  border-bottom: 1px solid #2a2a3e;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.controls-left, .controls-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.controls-center {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.78rem;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-weight: 500;
+  mat-icon { font-size: 14px; width: 14px; height: 14px; }
+
+  &.online  { background: rgba(76,175,80,0.15);  color: #4caf50; }
+  &.offline { background: rgba(244,67,54,0.15);  color: #f44336; }
+}
+
+.stat-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.07);
+  color: #999;
+  mat-icon { font-size: 12px; width: 12px; height: 12px; }
+}
+
+.ctrl-label {
+  font-size: 0.75rem;
+  color: #888;
+  white-space: nowrap;
+}
+
+.ctrl-range {
+  width: 90px;
+  accent-color: #90caf9;
+  cursor: pointer;
+}
+
+.ctrl-val {
+  font-size: 0.75rem;
+  color: #aaa;
+  min-width: 28px;
+  text-align: right;
+}
+
+// ─── Canvas area ───────────────────────────────────────────────────────────────
+
+.canvas-wrapper {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  position: relative;
+  background: #050505;
+}
+
+.screen-canvas {
+  display: block;
+  max-width: 100%;
+  image-rendering: pixelated;
+  cursor: default;
+}
+
+// ─── Offline overlay ───────────────────────────────────────────────────────────
+
+.offline-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: rgba(0,0,0,0.8);
+  color: #666;
+
+  mat-icon { font-size: 56px; width: 56px; height: 56px; color: #444; }
+  p { margin: 0; font-size: 0.95rem; }
+}

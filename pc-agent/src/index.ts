@@ -5,18 +5,20 @@ import { PowerService } from './services/powerService';
 import { AppService } from './services/appService';
 import { OllamaService } from './services/ollamaService';
 import { SysInfoService } from './services/sysinfoService';
+import { ScreenService } from './services/screenService';
 import * as fileService from './services/fileService';
 
 const RELAY_URL = process.env.RELAY_URL!;
 const AGENT_SECRET = process.env.AGENT_SECRET!;
 const RECONNECT_INTERVAL = parseInt(process.env.RECONNECT_INTERVAL || '5000', 10);
-const SYSINFO_INTERVAL = parseInt(process.env.SYSINFO_INTERVAL || '10000', 10);
+const SYSINFO_INTERVAL = parseInt(process.env.SYSINFO_INTERVAL || '2000', 10);
 
 const terminalService = new TerminalService();
 const powerService    = new PowerService();
 const appService      = new AppService();
 const ollamaService   = new OllamaService();
 const sysinfoService  = new SysInfoService();
+const screenService   = new ScreenService();
 
 let ws: WebSocket | null = null;
 let sysinfoTimer: ReturnType<typeof setInterval> | null = null;
@@ -39,6 +41,7 @@ function connect(): void {
   ws.on('close', (code, reason) => {
     console.log(`[agent] Disconnected (${code}: ${reason}). Reconnecting in ${RECONNECT_INTERVAL}ms...`);
     stopSysinfoLoop();
+    screenService.stop();
     ws = null;
     setTimeout(connect, RECONNECT_INTERVAL);
   });
@@ -51,6 +54,12 @@ function connect(): void {
 function send(msg: object): void {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(msg));
+  }
+}
+
+function sendBinary(buf: Buffer): void {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(buf);
   }
 }
 
@@ -123,10 +132,30 @@ function handleMessage(raw: string): void {
         }
         break;
 
+      // ── Screen ──────────────────────────────────────────────────────────────
+      case 'screen.start': {
+        const fps     = typeof msg.fps     === 'number' ? msg.fps     : 10;
+        const quality = typeof msg.quality === 'number' ? msg.quality : 70;
+        console.log(`[agent] Screen capture started — ${fps}fps quality:${quality}`);
+        screenService.start((jpeg) => sendBinary(jpeg), { fps, quality });
+        break;
+      }
+
+      case 'screen.stop':
+        console.log('[agent] Screen capture stopped');
+        screenService.stop();
+        break;
+
       // ── Ollama ──────────────────────────────────────────────────────────────
       case 'ollama.models':
         ollamaService.listModels().then((models) => {
           send({ type: 'ollama.models.response', models });
+        });
+        break;
+
+      case 'ollama.ps':
+        ollamaService.getRunningModels().then((models) => {
+          send({ type: 'ollama.ps.response', sessionId, models });
         });
         break;
 

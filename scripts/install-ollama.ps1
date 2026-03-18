@@ -1,9 +1,6 @@
 # install-ollama.ps1
-# Installs Ollama on Windows, pulls default models, and registers it as a Windows Service
-# so it starts automatically and is accessible to the pc-agent.
-#
-# Run via SSH from laptop:
-#   ssh unger@192.168.0.137 "powershell -ExecutionPolicy Bypass -File D:\remote-pc-access\scripts\install-ollama.ps1"
+# Installs Ollama, registers it as a Windows Service, pulls free models.
+# Run via SSH: powershell -ExecutionPolicy Bypass -File D:\remote-pc-access\scripts\install-ollama.ps1
 
 $ErrorActionPreference = "Stop"
 
@@ -23,7 +20,7 @@ function Test-Command($cmd) {
 
 Info "=== Ollama Setup for Remote PC Access ==="
 
-# ─── 1. Install Ollama ────────────────────────────────────────────────────────
+# 1. Install Ollama
 Info "Checking Ollama..."
 if (Test-Command "ollama") {
     Success "Ollama already installed: $(ollama --version)"
@@ -31,7 +28,7 @@ if (Test-Command "ollama") {
     Info "Installing Ollama via winget..."
     winget install --id Ollama.Ollama --silent --accept-package-agreements --accept-source-agreements
     Refresh-Path
-    # winget installs to AppData by default — check common paths
+
     $ollamaPaths = @(
         "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe",
         "$env:ProgramFiles\Ollama\ollama.exe"
@@ -47,148 +44,139 @@ if (Test-Command "ollama") {
         }
     }
     Refresh-Path
+
     if (Test-Command "ollama") {
         Success "Ollama installed: $(ollama --version)"
     } else {
         Err "Ollama not found in PATH after install."
-        Err "Try logging out and back in, then re-run this script."
-        Err "Or install manually from https://ollama.com/download"
+        Err "Install manually from https://ollama.com/download then re-run."
         exit 1
     }
 }
 
-# ─── 2. Configure Ollama to listen on all interfaces ─────────────────────────
-# By default Ollama binds to 127.0.0.1 only. We need it on 0.0.0.0 so the
-# pc-agent (running as a service) can reach it, and optionally for LAN access.
-Info "Configuring Ollama to bind on all interfaces..."
+# 2. Configure Ollama to listen on all interfaces so pc-agent service can reach it
+Info "Configuring Ollama host..."
 [System.Environment]::SetEnvironmentVariable("OLLAMA_HOST", "0.0.0.0:11434", "Machine")
-$env:OLLAMA_HOST = "0.0.0.0:11434"
-
-# Allow longer context window
 [System.Environment]::SetEnvironmentVariable("OLLAMA_NUM_CTX", "8192", "Machine")
-
+$env:OLLAMA_HOST  = "0.0.0.0:11434"
+$env:OLLAMA_NUM_CTX = "8192"
 Success "OLLAMA_HOST set to 0.0.0.0:11434"
 
-# ─── 3. Register Ollama as a Windows Service via NSSM ────────────────────────
-$serviceName = "OllamaService"
-
-# Find ollama.exe
-$ollamaExe = (Get-Command ollama -ErrorAction SilentlyContinue)?.Source
+# 3. Find ollama.exe path
+$ollamaExe = $null
+$cmd = Get-Command ollama -ErrorAction SilentlyContinue
+if ($cmd) {
+    $ollamaExe = $cmd.Source
+}
 if (-not $ollamaExe) {
-    $candidates = @(
-        "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe",
-        "$env:ProgramFiles\Ollama\ollama.exe"
-    )
-    foreach ($c in $candidates) {
+    foreach ($c in @("$env:LOCALAPPDATA\Programs\Ollama\ollama.exe", "$env:ProgramFiles\Ollama\ollama.exe")) {
         if (Test-Path $c) { $ollamaExe = $c; break }
     }
 }
-
 if (-not $ollamaExe) {
-    Err "Cannot locate ollama.exe — cannot register service"
+    Err "Cannot locate ollama.exe"
     exit 1
 }
+Info "Found ollama at: $ollamaExe"
 
-Info "Registering Ollama as Windows Service ($serviceName)..."
+# 4. Register OllamaService via NSSM (auto-starts on boot)
+$serviceName = "OllamaService"
+Info "Registering $serviceName as Windows Service..."
+
+$prev = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 $existing = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if ($existing) {
-    Warn "Service already exists — removing to reinstall..."
-    nssm stop $serviceName 2>$null
-    nssm remove $serviceName confirm 2>$null
+    Warn "Service already exists - removing to reinstall..."
+    nssm stop   $serviceName 2>$null | Out-Null
+    nssm remove $serviceName confirm 2>$null | Out-Null
 }
+$ErrorActionPreference = $prev
 
 nssm install $serviceName $ollamaExe "serve"
-nssm set $serviceName AppDirectory (Split-Path $ollamaExe)
-nssm set $serviceName DisplayName "Ollama LLM Server"
-nssm set $serviceName Description "Runs Ollama local LLM server, used by Remote PC Access"
-nssm set $serviceName Start SERVICE_AUTO_START
-nssm set $serviceName AppStdout "$env:LOCALAPPDATA\ollama\service.log"
-nssm set $serviceName AppStderr "$env:LOCALAPPDATA\ollama\service-error.log"
+nssm set $serviceName AppDirectory    (Split-Path $ollamaExe)
+nssm set $serviceName DisplayName     "Ollama LLM Server"
+nssm set $serviceName Description     "Local LLM server used by Remote PC Access"
+nssm set $serviceName Start           SERVICE_AUTO_START
+nssm set $serviceName AppStdout       "$env:LOCALAPPDATA\ollama\service.log"
+nssm set $serviceName AppStderr       "$env:LOCALAPPDATA\ollama\service-error.log"
 nssm set $serviceName AppEnvironmentExtra "OLLAMA_HOST=0.0.0.0:11434" "OLLAMA_NUM_CTX=8192"
 
-Info "Starting Ollama service..."
+Info "Starting OllamaService..."
 nssm start $serviceName
-Start-Sleep -Seconds 3
+Start-Sleep -Seconds 4
 
 $svc = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if ($svc -and $svc.Status -eq "Running") {
-    Success "Ollama service running"
+    Success "OllamaService is running"
 } else {
-    Warn "Service may not have started — check: nssm status $serviceName"
+    Warn "Service may not be running yet - check: nssm status $serviceName"
 }
 
-# ─── 4. Pull models ───────────────────────────────────────────────────────────
-Info ""
-Info "Pulling AI models (this downloads large files — may take a while)..."
-Info "Models stored in: $env:USERPROFILE\.ollama\models"
-Info ""
-
-# Wait for Ollama to be ready
-$retries = 10
-for ($i = 0; $i -lt $retries; $i++) {
+# 5. Wait for Ollama API to be ready
+Info "Waiting for Ollama API..."
+$ready = $false
+for ($i = 0; $i -lt 15; $i++) {
     try {
-        $resp = Invoke-WebRequest -Uri "http://localhost:11434/api/tags" -UseBasicParsing -TimeoutSec 3
-        if ($resp.StatusCode -eq 200) { break }
+        $r = Invoke-WebRequest -Uri "http://localhost:11434/api/tags" -UseBasicParsing -TimeoutSec 3
+        if ($r.StatusCode -eq 200) { $ready = $true; break }
     } catch {}
-    Info "Waiting for Ollama to be ready... ($($i+1)/$retries)"
+    Info "Not ready yet, waiting... ($($i+1)/15)"
     Start-Sleep -Seconds 2
 }
+if (-not $ready) {
+    Warn "Ollama API did not respond in time - models will not be pulled now."
+    Warn "Run 'ollama pull llama3.2:3b' manually once it is running."
+    exit 0
+}
+Success "Ollama API is ready"
 
-# Pull models — change this list to add/remove models
+# 6. Pull free models
+# All models below are free and open-source - no account or payment needed.
+# llama3.2:3b  ~2GB  - fast general purpose chat (Meta, Apache 2.0)
+# mistral:7b   ~4GB  - strong reasoning and writing (Mistral AI, Apache 2.0)
+# codellama:7b ~4GB  - code completion and review (Meta, custom open license)
 $models = @(
-    @{ name = "llama3.2:3b";    desc = "Llama 3.2 3B — fast, general purpose (~2GB)" },
-    @{ name = "codellama:7b";   desc = "CodeLlama 7B — code generation and review (~4GB)" },
-    @{ name = "mistral:7b";     desc = "Mistral 7B — strong reasoning (~4GB)" }
+    "llama3.2:3b",
+    "mistral:7b",
+    "codellama:7b"
 )
 
 foreach ($model in $models) {
-    Info "Pulling $($model.name) — $($model.desc)"
-    $response = Invoke-WebRequest -Uri "http://localhost:11434/api/pull" `
-        -Method POST `
-        -Body "{`"name`": `"$($model.name)`", `"stream`": false}" `
-        -ContentType "application/json" `
-        -UseBasicParsing `
-        -TimeoutSec 600
-    if ($response.StatusCode -eq 200) {
-        Success "$($model.name) ready"
-    } else {
-        Warn "Pull may have failed for $($model.name) — check manually: ollama pull $($model.name)"
+    Info "Pulling $model (this may take a while on first run)..."
+    $body = "{`"name`": `"$model`", `"stream`": false}"
+    try {
+        $r = Invoke-WebRequest -Uri "http://localhost:11434/api/pull" `
+            -Method POST -Body $body -ContentType "application/json" `
+            -UseBasicParsing -TimeoutSec 600
+        if ($r.StatusCode -eq 200) {
+            Success "$model ready"
+        } else {
+            Warn "$model pull returned status $($r.StatusCode)"
+        }
+    } catch {
+        Warn "Pull failed for $model - run manually: ollama pull $model"
     }
 }
 
-# ─── 5. Windows Firewall rule for local LAN access ───────────────────────────
-Info "Adding Windows Firewall rule for Ollama (port 11434)..."
+# 7. Windows Firewall rule
+Info "Adding firewall rule for Ollama (port 11434)..."
 $ruleName = "Ollama LLM Server"
-$existing = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
-if (-not $existing) {
+$fwRule = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
+if (-not $fwRule) {
     New-NetFirewallRule -DisplayName $ruleName `
-        -Direction Inbound `
-        -Protocol TCP `
-        -LocalPort 11434 `
-        -Action Allow `
-        -Profile Private | Out-Null
+        -Direction Inbound -Protocol TCP -LocalPort 11434 `
+        -Action Allow -Profile Private | Out-Null
     Success "Firewall rule added"
 } else {
     Success "Firewall rule already exists"
 }
 
-# ─── Done ─────────────────────────────────────────────────────────────────────
+# Done
 Info ""
 Info "=== Ollama setup complete ==="
+Info "Service: OllamaService (starts automatically on boot)"
+Info "API: http://localhost:11434"
 Info ""
-Info "Models available:"
-try {
-    ollama list
-} catch {
-    Info "  (run 'ollama list' to see installed models)"
-}
-Info ""
-Info "API endpoint: http://localhost:11434"
-Info "Service name: $serviceName"
-Info ""
-Info "To pull additional models:"
-Info "  ollama pull phi3"
-Info "  ollama pull deepseek-coder:6.7b"
-Info "  ollama pull nomic-embed-text  (for embeddings)"
-Info ""
-Info "To check service status: nssm status $serviceName"
+Info "Installed models:"
+ollama list

@@ -8,8 +8,19 @@ export interface OllamaMessage {
   content: string;
 }
 
+export interface ModelInfo {
+  name: string;
+  sizeGB: number;
+}
+
+export interface RunningModel {
+  name: string;
+  sizeVramMB: number;
+}
+
 export type OllamaEvent =
-  | { type: 'models'; models: string[] }
+  | { type: 'models'; models: ModelInfo[] }
+  | { type: 'ps'; models: RunningModel[] }
   | { type: 'token'; data: string }
   | { type: 'done'; data: string }
   | { type: 'error'; error: string }
@@ -37,9 +48,16 @@ export class OllamaWsService implements OnDestroy {
 
     this.ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(event.data as string) as { type: string; models?: string[]; data?: string; error?: string };
+        const msg = JSON.parse(event.data as string) as {
+          type: string;
+          models?: ModelInfo[] | RunningModel[];
+          data?: string;
+          error?: string;
+        };
         if (msg.type === 'ollama.models.response') {
-          this.events$.next({ type: 'models', models: msg.models ?? [] });
+          this.events$.next({ type: 'models', models: (msg.models ?? []) as ModelInfo[] });
+        } else if (msg.type === 'ollama.ps.response') {
+          this.events$.next({ type: 'ps', models: (msg.models ?? []) as RunningModel[] });
         } else if (msg.type === 'ollama.token') {
           this.events$.next({ type: 'token', data: msg.data ?? '' });
         } else if (msg.type === 'ollama.done') {
@@ -60,6 +78,12 @@ export class OllamaWsService implements OnDestroy {
   cancel(): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'ollama.cancel' }));
+    }
+  }
+
+  requestPs(): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'ollama.ps' }));
     }
   }
 

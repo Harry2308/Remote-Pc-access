@@ -5,6 +5,8 @@ Start the entire stack with a single command:
 ```bash
 ./quickstart.sh
 ```
+bash scripts/run.sh
+
 
 That's it. Open your browser at **http://localhost:4200**
 

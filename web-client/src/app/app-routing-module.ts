@@ -5,6 +5,8 @@ import { Dashboard } from './pages/dashboard/dashboard';
 import { Terminal } from './pages/terminal/terminal';
 import { AiChat } from './pages/ai-chat/ai-chat';
 import { Files } from './pages/files/files';
+import { Screen } from './pages/screen/screen';
+import { Processes } from './pages/processes/processes';
 import { Shell } from './shell/shell';
 import { authGuard } from './guards/auth-guard';
 
@@ -19,6 +21,8 @@ const routes: Routes = [
       { path: 'terminal',  component: Terminal  },
       { path: 'files',     component: Files     },
       { path: 'ai',        component: AiChat    },
+      { path: 'screen',    component: Screen    },
+      { path: 'processes', component: Processes },
       { path: '',          redirectTo: 'dashboard', pathMatch: 'full' },
     ],
   },
