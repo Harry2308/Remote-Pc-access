@@ -41,4 +41,8 @@ export class ApiService {
   launchApp(name: string): Observable<MessageResponse> {
     return this.http.post<MessageResponse>(`${this.base}/apps/launch`, { name });
   }
+
+  getVncCredentials(): Observable<{ password: string }> {
+    return this.http.get<{ password: string }>(`${this.base}/vnc/credentials`);
+  }
 }

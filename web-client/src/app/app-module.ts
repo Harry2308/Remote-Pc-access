@@ -36,10 +36,11 @@ import { AiChat }     from './pages/ai-chat/ai-chat';
 import { Files }      from './pages/files/files';
 import { Screen }     from './pages/screen/screen';
 import { Processes }  from './pages/processes/processes';
+import { Connect }    from './pages/connect/connect';
 import { AuthInterceptor } from './interceptors/auth.interceptor';
 
 @NgModule({
-  declarations: [App, Shell, Login, Dashboard, Terminal, AiChat, Files, Screen, Processes],
+  declarations: [App, Shell, Login, Dashboard, Terminal, AiChat, Files, Screen, Processes, Connect],
   imports: [
     BrowserModule,
     BrowserAnimationsModule,

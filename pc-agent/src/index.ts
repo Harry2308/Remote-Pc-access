@@ -6,6 +6,7 @@ import { AppService } from './services/appService';
 import { OllamaService } from './services/ollamaService';
 import { SysInfoService } from './services/sysinfoService';
 import { ScreenService } from './services/screenService';
+import { InputService } from './services/inputService';
 import * as fileService from './services/fileService';
 
 const RELAY_URL = process.env.RELAY_URL!;
@@ -19,6 +20,7 @@ const appService      = new AppService();
 const ollamaService   = new OllamaService();
 const sysinfoService  = new SysInfoService();
 const screenService   = new ScreenService();
+const inputService    = new InputService();
 
 let ws: WebSocket | null = null;
 let sysinfoTimer: ReturnType<typeof setInterval> | null = null;
@@ -146,6 +148,25 @@ function handleMessage(raw: string): void {
         screenService.stop();
         break;
 
+      // ── Input (mouse / keyboard) ─────────────────────────────────────────────
+      case 'input.mouse': {
+        const { action, x, y, delta } = msg as unknown as {
+          action: string; x: number; y: number; delta?: number;
+        };
+        if (action === 'move')      inputService.moveMouse(x, y);
+        else if (action === 'click')     inputService.click(x, y);
+        else if (action === 'rclick')    inputService.rightClick(x, y);
+        else if (action === 'dblclick')  inputService.doubleClick(x, y);
+        else if (action === 'scroll')    inputService.scroll(delta ?? 0);
+        break;
+      }
+      case 'input.key': {
+        const { vk, down } = msg as unknown as { vk: number; down: boolean };
+        if (down) inputService.keyDown(vk);
+        else      inputService.keyUp(vk);
+        break;
+      }
+
       // ── Ollama ──────────────────────────────────────────────────────────────
       case 'ollama.models':
         ollamaService.listModels().then((models) => {
@@ -266,6 +287,7 @@ process.on('SIGINT', () => {
   console.log('[agent] Shutting down...');
   stopSysinfoLoop();
   terminalService.closeAll();
+  inputService.stop();
   ws?.close();
   process.exit(0);
 });

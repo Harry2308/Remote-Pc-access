@@ -87,6 +87,8 @@
   justify-content: center;
   position: relative;
   background: #050505;
+
+  &.hidden { display: none; }
 }
 
 .screen-canvas {
@@ -94,11 +96,34 @@
   max-width: 100%;
   image-rendering: pixelated;
   cursor: default;
+  outline: none;
+
+  &.interact {
+    cursor: crosshair;
+  }
 }
 
-// ─── Offline overlay ───────────────────────────────────────────────────────────
+.interact-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 14px;
+  background: rgba(255, 152, 0, 0.12);
+  color: #ffb74d;
+  font-size: 0.78rem;
+  flex-shrink: 0;
+  mat-icon { font-size: 14px; width: 14px; height: 14px; }
+}
 
-.offline-overlay {
+.interact-on {
+  background: rgba(255,152,0,0.15) !important;
+  color: #ffb74d !important;
+  border-color: #ff9800 !important;
+}
+
+// ─── Status overlay (shown when agent not connected) ───────────────────────────
+
+.status-overlay {
   position: absolute;
   inset: 0;
   display: flex;
@@ -106,9 +131,107 @@
   align-items: center;
   justify-content: center;
   gap: 16px;
-  background: rgba(0,0,0,0.8);
-  color: #666;
+  background: rgba(5, 5, 5, 0.92);
+  z-index: 10;
+}
 
-  mat-icon { font-size: 56px; width: 56px; height: 56px; color: #444; }
-  p { margin: 0; font-size: 0.95rem; }
+.status-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  padding: 20px 28px;
+  min-width: 320px;
+}
+
+.s-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+
+  mat-icon { font-size: 48px; width: 48px; height: 48px; }
+
+  &.offline  .icon-offline { color: #9e9e9e; }
+  &.waking   .icon-waking  { color: #ff9800; animation: pulse 1.5s ease-in-out infinite; }
+  &.agent-ready .icon-online { color: #4caf50; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+.s-info { flex: 1; }
+
+.s-label {
+  font-size: 1rem;
+  font-weight: 500;
+  color: #e0e0e0;
+}
+
+.s-countdown {
+  font-size: 0.85rem;
+  color: #888;
+  margin-top: 4px;
+}
+
+.wake-bar {
+  width: 320px;
+}
+
+.s-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+// ─── VNC top bar ───────────────────────────────────────────────────────────────
+
+.vnc-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: rgba(33, 150, 243, 0.1);
+  border-bottom: 1px solid rgba(33,150,243,0.2);
+  flex-shrink: 0;
+}
+
+.vnc-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: #2196f3;
+  mat-icon { font-size: 16px; width: 16px; height: 16px; }
+}
+
+// ─── VNC viewer ────────────────────────────────────────────────────────────────
+
+.vnc-wrapper {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #000;
+
+  &.visible { display: flex; }
+}
+
+.vnc-container {
+  width: 100%;
+  height: 100%;
+  min-height: 400px;
+
+  :host ::ng-deep canvas {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: contain;
+  }
 }

@@ -20,6 +20,12 @@ function Err     { Write-Host "[setup] $args" -ForegroundColor Red }
 Info "=== Remote PC Access - Windows Setup Script ==="
 Info "Running as: $env:USERNAME on $env:COMPUTERNAME"
 
+# Add Defender exclusion so ps1 helper scripts aren't blocked
+try {
+    Add-MpPreference -ExclusionPath "D:\remote-pc-access" -ErrorAction SilentlyContinue
+    Success "Windows Defender exclusion set for D:\remote-pc-access"
+} catch { Warn "Could not set Defender exclusion (non-fatal): $_" }
+
 # Helper: refresh PATH in current session after winget installs
 function Refresh-Path {
     $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
@@ -155,7 +161,107 @@ if (Test-Path "$agentDir\.env.example") {
     }
 }
 
-# 9. Remove legacy NSSM service if present (migrating to Scheduled Task)
+# 9. Enable RDP (Remote Desktop) - required for remote interactive sessions
+Info "Enabling Remote Desktop..."
+reg add "HKLM\System\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f | Out-Null
+netsh advfirewall firewall add rule name="RDP-In" protocol=TCP dir=in localport=3389 action=allow | Out-Null
+net stop TermService /y | Out-Null
+net start TermService | Out-Null
+Success "RDP enabled and TermService restarted (port 3389)"
+
+# 10. Install and configure TightVNC server (free, open-source, works on Windows Home)
+Info "Setting up TightVNC server..."
+
+# Read VNC_PASSWORD from pc-agent .env (written by run.sh before this script runs)
+$envFile = 'D:\remote-pc-access\pc-agent\.env'
+$vncPassword = ''
+if (Test-Path $envFile) {
+    $vncLine = Get-Content $envFile | Where-Object { $_ -match '^VNC_PASSWORD=' }
+    if ($vncLine) { $vncPassword = ($vncLine -replace '^VNC_PASSWORD=', '').Trim() }
+}
+
+$tvnExe = 'C:\Program Files\TightVNC\tvnserver.exe'
+
+if (-not (Test-Path $tvnExe)) {
+    Info "Installing TightVNC via winget..."
+    winget install --id GlavSoft.TightVNC --silent --accept-package-agreements --accept-source-agreements
+    Start-Sleep -Seconds 5
+    if (Test-Path $tvnExe) { Success "TightVNC installed" } else { Warn "tvnserver.exe not found after install" }
+} else {
+    Success "TightVNC already installed"
+}
+
+# Encode VNC password using standard VNC DES obfuscation (RFB protocol, same for TightVNC)
+function ConvertTo-VNCPasswordBytes {
+    param([string]$PlainText)
+    function Reverse-Bits {
+        param([byte]$b)
+        [byte]$r = 0
+        for ($i = 0; $i -lt 8; $i++) {
+            $r = [byte](($r -shl 1) -bor ($b -band 1))
+            $b = [byte]($b -shr 1)
+        }
+        return $r
+    }
+    $rawKey = [byte[]]@(0x17, 0x52, 0x6B, 0x06, 0x23, 0x4E, 0x58, 0x07)
+    $desKey = $rawKey | ForEach-Object { Reverse-Bits $_ }
+    $pwdBytes = [byte[]]::new(8)
+    $maxLen = [Math]::Min($PlainText.Length, 8)
+    $src = [System.Text.Encoding]::ASCII.GetBytes($PlainText.Substring(0, $maxLen))
+    [Array]::Copy($src, $pwdBytes, $src.Length)
+    $des = [System.Security.Cryptography.DES]::Create()
+    $des.Mode = [System.Security.Cryptography.CipherMode]::ECB
+    $des.Padding = [System.Security.Cryptography.PaddingMode]::None
+    $des.Key = $desKey
+    return $des.CreateEncryptor().TransformFinalBlock($pwdBytes, 0, 8)
+}
+
+# Write TightVNC registry config under HKLM (applies to the service, not per-user)
+$regPath = 'HKLM:\SOFTWARE\TightVNC\Server'
+try {
+    $null = New-Item -Path $regPath -Force -ErrorAction Stop
+    Set-ItemProperty -Path $regPath -Name 'UseVncAuthentication' -Value 1 -Type DWord
+    Set-ItemProperty -Path $regPath -Name 'QueryConnect'         -Value 0 -Type DWord
+    Set-ItemProperty -Path $regPath -Name 'DisconnectClients'    -Value 1 -Type DWord
+    if ($vncPassword.Length -ge 1) {
+        $encrypted = ConvertTo-VNCPasswordBytes $vncPassword
+        Set-ItemProperty -Path $regPath -Name 'Password'        -Value $encrypted -Type Binary
+        Set-ItemProperty -Path $regPath -Name 'ControlPassword' -Value $encrypted -Type Binary
+        Info "VNC password written to registry"
+    } else {
+        Warn "VNC_PASSWORD empty - set VNC_PASSWORD in relay-server/.env and re-run"
+    }
+    Success "TightVNC registry configured"
+} catch {
+    Warn "TightVNC registry write failed: $($_.Exception.Message)"
+}
+
+# Register TightVNC as a Windows service and start it
+if (Test-Path $tvnExe) {
+    $svc = Get-Service -Name tvnserver -ErrorAction SilentlyContinue
+    if (-not $svc) {
+        Info "Registering TightVNC service..."
+        & $tvnExe -install -silent
+        Start-Sleep -Seconds 3
+    }
+    Stop-Service  -Name tvnserver -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+    Start-Service -Name tvnserver        -ErrorAction SilentlyContinue
+    $svcState = (Get-Service -Name tvnserver -ErrorAction SilentlyContinue).Status
+    if ($svcState -eq 'Running') {
+        Success "TightVNC service running on port 5900"
+    } else {
+        Warn "TightVNC service state: $svcState"
+    }
+} else {
+    Warn "tvnserver.exe not found - skipping service setup"
+}
+
+# Open VNC port in Windows Firewall
+netsh advfirewall firewall add rule name="VNC-In" protocol=TCP dir=in localport=5900 action=allow | Out-Null
+Success "VNC firewall rule added (port 5900)"
+
+# 11. Remove legacy NSSM service if present (migrating to Scheduled Task)
 $taskName    = "RemotePCAgent"
 $nssmExe     = "C:\Windows\System32\nssm.exe"
 $nodeCmd     = Get-Command node -ErrorAction SilentlyContinue
@@ -193,7 +299,9 @@ if ($nodeExe -and (Test-Path $agentScript)) {
                     -RestartInterval (New-TimeSpan -Minutes 1) `
                     -StartWhenAvailable `
                     -MultipleInstances IgnoreNew
-    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest
+    # RunLevel Limited (not Highest) - runs in user's normal window station (WinSta0\Default).
+    # Elevated tasks get a separate window station which breaks GDI screen capture.
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
         -Settings $settings -Principal $principal -Force | Out-Null
     Success "Task '$taskName' registered (runs at logon in interactive session)"

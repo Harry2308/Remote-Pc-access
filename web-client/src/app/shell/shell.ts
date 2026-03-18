@@ -25,15 +25,16 @@ export class Shell implements OnInit, OnDestroy {
   private subs = new Subscription();
 
   navItems = [
-    { path: '/dashboard',  icon: 'dashboard',        label: 'Dashboard'  },
-    { path: '/terminal',   icon: 'terminal',          label: 'Terminal'   },
-    { path: '/files',      icon: 'folder',            label: 'Files'      },
-    { path: '/ai',         icon: 'smart_toy',         label: 'Local AI'   },
-    { path: '/screen',     icon: 'desktop_windows',   label: 'Screen'     },
-    { path: '/processes',  icon: 'monitor_heart',     label: 'Processes'  },
+    { path: '/screen',     icon: 'desktop_windows',    label: 'Screen'     },
+    { path: '/dashboard',  icon: 'dashboard',          label: 'Dashboard'  },
+    { path: '/terminal',   icon: 'terminal',           label: 'Terminal'   },
+    { path: '/files',      icon: 'folder',             label: 'Files'      },
+    { path: '/ai',         icon: 'smart_toy',          label: 'Local AI'   },
+    { path: '/processes',  icon: 'monitor_heart',      label: 'Processes'  },
   ];
 
   private titleMap: Record<string, string> = {
+    '/connect':    'Connect',
     '/dashboard':  'Dashboard',
     '/terminal':   'Terminal',
     '/files':      'Files',

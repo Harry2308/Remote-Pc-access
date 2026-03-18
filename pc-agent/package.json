@@ -12,7 +12,7 @@
   "dependencies": {
     "dotenv": "^16.4.5",
     "node-pty": "^1.0.0",
-    "node-screenshots": "^0.2.8",
+    "screenshot-desktop": "^1.0.0",
     "uuid": "^9.0.1",
     "ws": "^8.17.1"
   },

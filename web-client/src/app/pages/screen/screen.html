@@ -1,7 +1,7 @@
 <div class="screen-page">
 
-  <!-- Controls bar -->
-  <div class="controls-bar">
+  <!-- ── Controls bar (only when agent is live) ───────────────────────────── -->
+  <div class="controls-bar" *ngIf="connStatus === 'agent-ready'">
     <div class="controls-left">
       <span class="status-chip" [class.online]="connected" [class.offline]="!connected">
         <mat-icon>{{ connected ? 'videocam' : 'videocam_off' }}</mat-icon>
@@ -10,16 +10,17 @@
       <span class="stat-badge" *ngIf="connected">
         <mat-icon>speed</mat-icon>{{ actualFps }} fps
       </span>
+      <span class="stat-badge" *ngIf="connected && latencyMs > 0">
+        <mat-icon>timer</mat-icon>{{ latencyMs }}ms
+      </span>
     </div>
 
     <div class="controls-center">
-      <!-- FPS slider -->
       <label class="ctrl-label">FPS</label>
       <input type="range" min="1" max="30" step="1" [(ngModel)]="fps"
         (change)="applySettings()" class="ctrl-range" title="Frames per second">
       <span class="ctrl-val">{{ fps }}</span>
 
-      <!-- Quality slider -->
       <label class="ctrl-label">Quality</label>
       <input type="range" min="20" max="95" step="5" [(ngModel)]="quality"
         (change)="applySettings()" class="ctrl-range" title="JPEG quality">
@@ -27,8 +28,19 @@
     </div>
 
     <div class="controls-right">
-      <button mat-icon-button (click)="reconnect()" title="Reconnect">
+      <button mat-stroked-button
+        [class.interact-on]="interactMode"
+        (click)="toggleInteract()"
+        [title]="interactMode ? 'Disable mouse & keyboard forwarding' : 'Enable mouse & keyboard forwarding'"
+        [color]="interactMode ? 'warn' : ''">
+        <mat-icon>mouse</mat-icon>
+        {{ interactMode ? 'Interact ON' : 'Interact OFF' }}
+      </button>
+      <button mat-icon-button (click)="reconnect()" title="Reconnect stream">
         <mat-icon>refresh</mat-icon>
+      </button>
+      <button mat-icon-button (click)="connectVncNow()" title="Connect via VNC">
+        <mat-icon>desktop_windows</mat-icon>
       </button>
       <button mat-icon-button (click)="toggleFullscreen()" title="Fullscreen">
         <mat-icon>{{ fullscreen ? 'fullscreen_exit' : 'fullscreen' }}</mat-icon>
@@ -36,18 +48,85 @@
     </div>
   </div>
 
-  <!-- Canvas view -->
-  <div class="canvas-wrapper">
-    <canvas #canvas class="screen-canvas"></canvas>
+  <!-- ── Interact hint bar ────────────────────────────────────────────────── -->
+  <div class="interact-hint" *ngIf="interactMode && connected">
+    <mat-icon>info</mat-icon>
+    Mouse &amp; keyboard active — click the screen, type normally. Right-click = right-click. Scroll wheel works.
+  </div>
 
-    <!-- Offline overlay -->
-    <div class="offline-overlay" *ngIf="!connected">
-      <mat-icon>videocam_off</mat-icon>
-      <p>PC offline or agent not connected</p>
-      <button mat-raised-button color="primary" (click)="reconnect()">
-        <mat-icon>refresh</mat-icon> Reconnect
+  <!-- ── VNC top bar (when VNC is active) ─────────────────────────────────── -->
+  <div class="vnc-topbar" *ngIf="connStatus === 'vnc-connected'">
+    <span class="vnc-status"><mat-icon>desktop_windows</mat-icon> VNC Connected</span>
+    <div style="display:flex;gap:8px">
+      <button mat-stroked-button (click)="disconnectVnc()">
+        <mat-icon>close</mat-icon> Disconnect VNC
+      </button>
+      <button mat-stroked-button (click)="goToDashboard()">
+        <mat-icon>dashboard</mat-icon> Dashboard
       </button>
     </div>
+  </div>
+
+  <!-- ── Canvas area ──────────────────────────────────────────────────────── -->
+  <div class="canvas-wrapper" [class.hidden]="isVncVisible">
+    <canvas #canvas class="screen-canvas"
+      tabindex="0"
+      [class.interact]="interactMode"
+      (click)="onCanvasClick($event)"
+      (dblclick)="onCanvasDblClick($event)"
+      (contextmenu)="onCanvasContextMenu($event)"
+      (mousemove)="onCanvasMouseMove($event)"
+      (wheel)="onCanvasWheel($event)">
+    </canvas>
+
+    <!-- Status overlay: shown when agent is NOT live -->
+    <div class="status-overlay" *ngIf="connStatus !== 'agent-ready'">
+
+      <div class="status-card">
+        <!-- Icon / spinner -->
+        <div class="s-icon" [ngClass]="connStatus">
+          <mat-spinner *ngIf="connStatus === 'checking' || connStatus === 'connecting'" diameter="48"></mat-spinner>
+          <mat-icon *ngIf="connStatus === 'offline'" class="icon-offline">power_off</mat-icon>
+          <mat-icon *ngIf="connStatus === 'waking'"  class="icon-waking">power_settings_new</mat-icon>
+        </div>
+
+        <div class="s-info">
+          <div class="s-label">{{ statusMessage }}</div>
+          <div class="s-countdown" *ngIf="connStatus === 'waking'">Boot in {{ wakeCountdown }}s</div>
+        </div>
+      </div>
+
+      <!-- Progress bar during waking -->
+      <mat-progress-bar
+        *ngIf="connStatus === 'waking'"
+        mode="determinate"
+        [value]="wakeProgress"
+        class="wake-bar">
+      </mat-progress-bar>
+
+      <!-- Actions: offline -->
+      <div class="s-actions" *ngIf="connStatus === 'offline'">
+        <button mat-raised-button color="primary" (click)="wakeUp()">
+          <mat-icon>power_settings_new</mat-icon> Wake Up PC
+        </button>
+        <button mat-stroked-button (click)="connectVncNow()">
+          <mat-icon>desktop_windows</mat-icon> Connect via VNC
+        </button>
+      </div>
+
+      <!-- Actions: waking -->
+      <div class="s-actions" *ngIf="connStatus === 'waking'">
+        <button mat-stroked-button (click)="connectVncNow()">
+          <mat-icon>skip_next</mat-icon> Skip wait &amp; try VNC now
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── VNC viewer ───────────────────────────────────────────────────────── -->
+  <div class="vnc-wrapper" [class.visible]="isVncVisible">
+    <div #vncContainer class="vnc-container"></div>
   </div>
 
 </div>

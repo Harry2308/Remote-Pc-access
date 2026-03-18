@@ -39,6 +39,9 @@
             ],
             "styles": [
               "src/styles.scss"
+            ],
+            "allowedCommonJsDependencies": [
+              "@novnc/novnc/lib/rfb"
             ]
           },
           "configurations": {

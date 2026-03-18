@@ -62,6 +62,12 @@ router.post('/apps/launch', (req: AuthRequest, res: Response): void => {
     : res.status(503).json({ error: 'PC agent not connected' });
 });
 
+// ─── VNC ──────────────────────────────────────────────────────────────────────
+
+router.get('/vnc/credentials', (_req: AuthRequest, res: Response): void => {
+  res.json({ password: process.env.VNC_PASSWORD || '' });
+});
+
 // ─── Sysinfo ──────────────────────────────────────────────────────────────────
 
 router.get('/sysinfo', (_req: AuthRequest, res: Response): void => {

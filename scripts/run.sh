@@ -14,6 +14,8 @@ PC_HOST="192.168.0.137"
 PC_USER="unger"
 PC_PATH="D:/remote-pc-access"
 PC_PATH_WIN="D:\\remote-pc-access"
+PC_MAC="b4:2e:99:4c:35:8f"
+BROADCAST_IP="192.168.0.255"
 TASK_NAME="RemotePCAgent"
 RELAY_ENV="$ROOT/relay-server/.env"
 LOGDIR="$ROOT/.logs"
@@ -28,6 +30,18 @@ warn()    { echo -e "${YELLOW}[run]${NC} $*"; }
 error()   { echo -e "${RED}[run]${NC}  $*"; }
 die()     { error "$*"; exit 1; }
 
+# Send a Wake-on-LAN magic packet directly (no external tools needed — pure Python)
+send_wol_direct() {
+  python3 -c "
+import socket
+mac = '${PC_MAC}'.replace(':', '')
+packet = b'\xff' * 6 + bytes.fromhex(mac) * 16
+with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    s.sendto(packet, ('${BROADCAST_IP}', 9))
+" && info "WoL magic packet sent to ${PC_MAC} via ${BROADCAST_IP}"
+}
+
 # ── Step 1: Ensure relay-server/.env exists and is configured ────────────────
 if [[ ! -f "$RELAY_ENV" ]]; then
   info "relay-server/.env not found — creating from template..."
@@ -37,6 +51,9 @@ AGENT_SECRET=
 ADMIN_PASSWORD=
 ADMIN_USERNAME=admin
 PORT=3001
+WIN_PASSWORD=
+VNC_PASSWORD=
+PC_HOST=
 EOF
 fi
 
@@ -71,10 +88,31 @@ if [[ -z "$WIN_PASSWORD" ]]; then
   info "Windows password saved to relay-server/.env"
 fi
 
+VNC_PASSWORD=$(grep '^VNC_PASSWORD=' "$RELAY_ENV" | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+if [[ -z "$VNC_PASSWORD" ]]; then
+  echo ""
+  read -rsp "$(echo -e "${CYAN}[run]${NC} Choose a VNC password for remote screen login (min 6 chars, saved once): ")" VNC_PASSWORD
+  echo ""
+  if grep -q '^VNC_PASSWORD=' "$RELAY_ENV"; then
+    sed -i "s/^VNC_PASSWORD=.*/VNC_PASSWORD=${VNC_PASSWORD}/" "$RELAY_ENV"
+  else
+    echo "VNC_PASSWORD=${VNC_PASSWORD}" >> "$RELAY_ENV"
+  fi
+  info "VNC password saved to relay-server/.env"
+fi
+
 # Re-read final values to be sure
 AGENT_SECRET=$(grep '^AGENT_SECRET=' "$RELAY_ENV" | cut -d= -f2- | tr -d '"' | tr -d "'")
 WIN_PASSWORD=$(grep '^WIN_PASSWORD=' "$RELAY_ENV" | cut -d= -f2- | tr -d '"' | tr -d "'")
+VNC_PASSWORD=$(grep '^VNC_PASSWORD=' "$RELAY_ENV" | cut -d= -f2- | tr -d '"' | tr -d "'")
 success "Secrets ready"
+
+# Ensure PC_HOST is in relay .env (relay uses it for VNC proxy)
+if grep -q '^PC_HOST=' "$RELAY_ENV"; then
+  sed -i "s|^PC_HOST=.*|PC_HOST=${PC_HOST}|" "$RELAY_ENV"
+else
+  echo "PC_HOST=${PC_HOST}" >> "$RELAY_ENV"
+fi
 
 # ── Step 2: Ensure wol-agent/.env is configured ───────────────────────────────
 WOL_ENV="$ROOT/wol-agent/.env"
@@ -131,18 +169,50 @@ SCP="scp -o ControlMaster=auto -o ControlPath=${SOCKET} -o ControlPersist=120 -o
 cleanup_ssh() { ssh -O exit -o ControlPath="${SOCKET}" "${PC_USER}@${PC_HOST}" 2>/dev/null || true; }
 trap cleanup_ssh EXIT
 
-# ── Step 5: Verify PC is reachable before attempting SSH ─────────────────────
+# ── Step 5: Wake PC if offline, then wait for it to come up ──────────────────
+PC_REACHABLE=false
 info "Checking PC is reachable at ${PC_HOST}..."
-if ! ping -c 1 -W 3 "${PC_HOST}" &>/dev/null; then
-  die "Cannot reach PC at ${PC_HOST}. Is it on and connected to the network?"
+if ping -c 1 -W 3 "${PC_HOST}" &>/dev/null; then
+  success "PC is already reachable"
+  PC_REACHABLE=true
+else
+  warn "PC is offline — sending Wake-on-LAN..."
+  send_wol_direct
+  # Send a second packet after 3s in case the first was lost
+  sleep 3
+  send_wol_direct
+  info "Waiting for PC to boot (up to 90s)..."
+  for i in $(seq 1 90); do
+    sleep 1
+    printf "\r${CYAN}[run]${NC} Waiting... %ds" "$i"
+    if ping -c 1 -W 1 "${PC_HOST}" &>/dev/null; then
+      echo ""
+      success "PC came online after ${i}s"
+      PC_REACHABLE=true
+      # Give Windows a few extra seconds to start SSH service
+      sleep 5
+      break
+    fi
+  done
+  if [[ "$PC_REACHABLE" == "false" ]]; then
+    echo ""
+    warn "PC did not respond after 90s — WoL may have failed (PC might be unplugged)."
+    warn "Local services will still start. Use the Connect page in the web UI to retry."
+  fi
 fi
-success "PC is reachable"
 
-info "Connecting to ${PC_USER}@${PC_HOST} (enter Windows password once)..."
-if ! $SSH "${PC_USER}@${PC_HOST}" "echo connected" > /dev/null 2>&1; then
-  die "SSH connection failed. Check your Windows password and that OpenSSH is running on the PC."
+if [[ "$PC_REACHABLE" == "true" ]]; then
+  info "Connecting to ${PC_USER}@${PC_HOST}..."
+  if ! $SSH "${PC_USER}@${PC_HOST}" "echo connected" > /dev/null 2>&1; then
+    warn "SSH connection failed — skipping PC-side setup this run."
+    PC_REACHABLE=false
+  else
+    success "SSH connection established"
+  fi
 fi
-success "SSH connection established"
+
+# ── Steps 6–14: PC-side setup (skipped if PC is offline) ────────────────────
+if [[ "$PC_REACHABLE" == "true" ]]; then
 
 # ── SSH key setup (one-time, idempotent — eliminates password prompt) ─────────
 if [[ -f ~/.ssh/id_ed25519.pub ]]; then
@@ -199,12 +269,12 @@ $SSH "${PC_USER}@${PC_HOST}" \
   "powershell -Command \"New-Item -ItemType Directory -Force -Path '${PC_PATH_WIN}\\pc-agent' | Out-Null; New-Item -ItemType Directory -Force -Path '${PC_PATH_WIN}\\scripts' | Out-Null\"" \
   2>/dev/null || true
 
-# ── Step 7: Stop the agent task (if running) ─────────────────────────────────
+# ── Step 7: Stop the agent task and kill any leftover node.exe ───────────────
 info "Stopping ${TASK_NAME} task..."
 $SSH "${PC_USER}@${PC_HOST}" \
-  "powershell -Command \"\$ErrorActionPreference='Continue'; Stop-ScheduledTask -TaskName '${TASK_NAME}' 2>\$null; Start-Sleep -Seconds 2\"" \
+  "powershell -Command \"\$ErrorActionPreference='Continue'; Stop-ScheduledTask -TaskName '${TASK_NAME}' 2>\$null; Start-Sleep -Seconds 1; Stop-Process -Name node -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1\"" \
   2>/dev/null || true
-success "Task stopped"
+success "Task stopped and old node process killed"
 
 # ── Step 8: Copy pc-agent source files (only if changed) ─────────────────────
 if [[ "$DO_SRC_COPY" == "true" ]]; then
@@ -228,7 +298,14 @@ else
   success "Windows scripts unchanged — skipped script copy"
 fi
 
-# ── Step 10: Run setup-windows.ps1 (prereqs + conditional build) ─────────────
+# ── Step 10a: Write pc-agent .env BEFORE setup runs (setup reads VNC_PASSWORD from it) ──
+info "Writing pc-agent .env..."
+$SSH "${PC_USER}@${PC_HOST}" \
+  "powershell -Command \"Set-Content -Path '${PC_PATH_WIN}\\pc-agent\\.env' -Value @('RELAY_URL=${RELAY_URL}', 'AGENT_SECRET=${AGENT_SECRET}', 'ALLOWED_SHELL=powershell', 'RECONNECT_INTERVAL=5000', 'VNC_PASSWORD=${VNC_PASSWORD}')\"" \
+  || die "Failed to write .env on PC"
+success "pc-agent .env written"
+
+# ── Step 10b: Run setup-windows.ps1 (prereqs + conditional build + VNC) ──────
 SETUP_FLAGS=""
 [[ "$DO_INSTALL" != "true" ]] && SETUP_FLAGS="$SETUP_FLAGS -SkipNpmInstall"
 [[ "$DO_BUILD"   != "true" ]] && SETUP_FLAGS="$SETUP_FLAGS -SkipBuild"
@@ -247,12 +324,7 @@ success "PC setup complete"
 }
 [[ "$DO_SCRIPTS" == "true" ]] && pc_write_hash "windows-scripts" "$LOCAL_SCRIPTS_HASH"
 
-# ── Step 11: Write pc-agent .env (task reads it via dotenv on start) ─────────
-info "Writing pc-agent .env..."
-$SSH "${PC_USER}@${PC_HOST}" \
-  "powershell -Command \"Set-Content -Path '${PC_PATH_WIN}\\pc-agent\\.env' -Value @('RELAY_URL=${RELAY_URL}', 'AGENT_SECRET=${AGENT_SECRET}', 'ALLOWED_SHELL=powershell', 'RECONNECT_INTERVAL=5000')\"" \
-  || die "Failed to write .env on PC"
-success "pc-agent .env written (RELAY_URL=${RELAY_URL})"
+# (pc-agent .env is written in Step 10a above)
 
 # ── Step 12: Start the scheduled task ────────────────────────────────────────
 # Interactive task requires Windows user to be logged into their desktop (physical/RDP).
@@ -274,7 +346,7 @@ else
   info "Windows session active: ${WIN_SESSION}"
   info "Starting ${TASK_NAME} scheduled task..."
   $SSH "${PC_USER}@${PC_HOST}" \
-    "powershell -Command \"\$ErrorActionPreference='Continue'; Start-ScheduledTask -TaskName '${TASK_NAME}' 2>\$null | Out-Null\"" \
+    "powershell -Command \"\$ErrorActionPreference='Continue'; Stop-Process -Name node -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1; Start-ScheduledTask -TaskName '${TASK_NAME}' 2>\$null | Out-Null\"" \
     2>/dev/null || true
 
   # Wait up to 15s for node.exe to appear
@@ -323,6 +395,8 @@ if [[ "$INSTALL_OLLAMA" == "true" ]]; then
     "powershell -ExecutionPolicy Bypass -File ${PC_PATH_WIN}\\scripts\\install-ollama.ps1" \
     || warn "Ollama install reported errors — check output above."
 fi
+
+fi # end PC_REACHABLE block
 
 # ── Step 15: Set up wol-agent Python venv (once) ─────────────────────────────
 if [[ ! -f "$ROOT/wol-agent/.venv/bin/python" ]]; then
@@ -408,27 +482,34 @@ start_bg "relay-server" "$ROOT/relay-server" "npm start"                    3001
 start_bg "wol-agent"    "$ROOT/wol-agent"    ".venv/bin/python server.py"  3003
 
 # ── Step 19: Verify agent connects to relay ───────────────────────────────────
-info "Waiting for PC agent to connect to relay (up to 20s)..."
-AGENT_CONNECTED=false
-for i in $(seq 1 10); do
-  sleep 2
-  if grep -q "PC Agent connected" "$LOGDIR/relay-server.log" 2>/dev/null; then
-    AGENT_CONNECTED=true
-    break
-  fi
-done
+if [[ "$PC_REACHABLE" == "true" ]]; then
+  info "Waiting for PC agent to connect to relay (up to 20s)..."
+  AGENT_CONNECTED=false
+  for i in $(seq 1 10); do
+    sleep 2
+    if grep -q "PC Agent connected" "$LOGDIR/relay-server.log" 2>/dev/null; then
+      AGENT_CONNECTED=true
+      break
+    fi
+  done
 
-if [[ "$AGENT_CONNECTED" == "true" ]]; then
-  success "PC Agent connected to relay!"
+  if [[ "$AGENT_CONNECTED" == "true" ]]; then
+    success "PC Agent connected to relay!"
+  else
+    warn "PC agent has not connected yet."
+    warn "Relay log tail:"
+    tail -10 "$LOGDIR/relay-server.log" 2>/dev/null || true
+    if [[ "$PC_REACHABLE" == "true" ]]; then
+      warn "Agent log tail (fetching over SSH)..."
+      $SSH "${PC_USER}@${PC_HOST}" \
+        "powershell -Command \"if (Test-Path '${PC_PATH_WIN}\\pc-agent\\service.log') { Get-Content '${PC_PATH_WIN}\\pc-agent\\service.log' | Select-Object -Last 10 } else { Write-Host 'No service.log' }\"" \
+        2>/dev/null || true
+    fi
+    warn "The web UI will still open — keep an eye on the relay log."
+  fi
 else
-  warn "PC agent has not connected yet."
-  warn "Relay log tail:"
-  tail -10 "$LOGDIR/relay-server.log" 2>/dev/null || true
-  warn "Agent log tail (fetching over SSH)..."
-  $SSH "${PC_USER}@${PC_HOST}" \
-    "powershell -Command \"if (Test-Path '${PC_PATH_WIN}\\pc-agent\\service.log') { Get-Content '${PC_PATH_WIN}\\pc-agent\\service.log' | Select-Object -Last 10 } else { Write-Host 'No service.log' }\"" \
-    2>/dev/null || true
-  warn "The web UI will still open — keep an eye on the relay log."
+  info "PC was offline — skipping agent connection check."
+  info "Use the Connect page in the web UI to wake and connect to the PC."
 fi
 
 # ── Step 20: Summary ─────────────────────────────────────────────────────────
@@ -437,8 +518,11 @@ success "==========================================="
 success " Stack is up"
 info "  relay-server : http://localhost:3001"
 info "  wol-agent    : http://localhost:3003"
-info "  web-client   : http://localhost:4200"
+info "  web-client   : http://localhost:4200  (opening...)"
 info "  Relay log    : tail -f .logs/relay-server.log"
+info ""
+info "  Browser opens at /connect — click 'Wake Up PC'"
+info "  to boot the PC and connect via the embedded VNC viewer."
 success "==========================================="
 info "Press Ctrl+C to stop all local services."
 echo ""

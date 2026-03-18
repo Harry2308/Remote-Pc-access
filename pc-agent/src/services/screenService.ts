@@ -1,9 +1,16 @@
-// node-screenshots uses Windows Graphics Capture API.
-// NOTE: WGC still requires an interactive desktop session — running in Session 0
-// (Windows Service) produces a black screen. The agent must run as a Scheduled Task
-// with LogonType=Interactive to capture the real desktop.
-import { Monitor } from 'node-screenshots';
-import { appendFileSync } from 'fs';
+/**
+ * ScreenService — captures the desktop and streams JPEG frames via a callback.
+ *
+ * Uses a persistent PowerShell child process that compiles a C# GDI wrapper once,
+ * then runs a continuous capture loop. Frames are written to stdout as:
+ *   [4-byte LE length][JPEG bytes]
+ *
+ * This avoids spawning a new process per frame (the old screenshot-desktop approach
+ * had ~150 ms overhead per frame, limiting FPS to ~4-5). With a persistent process
+ * the actual GDI capture + JPEG encode takes ~20-40 ms, allowing 15-25 fps.
+ */
+import { spawn, ChildProcess } from 'child_process';
+import { writeFileSync, appendFileSync } from 'fs';
 import { join } from 'path';
 
 const SCREEN_LOG = join(process.cwd(), 'screen-capture.log');
@@ -13,65 +20,152 @@ function slog(msg: string): void {
   try { appendFileSync(SCREEN_LOG, line); } catch { /* ignore */ }
 }
 
+// PowerShell script: compiles C# GDI capture once, then loops at target FPS.
+// Frames are written to stdout as 4-byte LE length + JPEG bytes.
+const PS_CAPTURE_SCRIPT = String.raw`
+param([int]$fps = 10, [int]$quality = 70)
+Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.Windows.Forms
+
+$screen     = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$rawOut     = [System.Console]::OpenStandardOutput()
+$intervalMs = [int][Math]::Max(33, [Math]::Round(1000.0 / $fps))
+
+$bmp = New-Object System.Drawing.Bitmap($screen.Width, $screen.Height, [System.Drawing.Imaging.PixelFormat]::Format32bppRgb)
+$g   = [System.Drawing.Graphics]::FromImage($bmp)
+
+$encParams       = New-Object System.Drawing.Imaging.EncoderParameters(1)
+$encParams.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter(
+    [System.Drawing.Imaging.Encoder]::Quality, [long]$quality)
+$jpegCodec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() |
+    Where-Object { $_.MimeType -eq 'image/jpeg' } | Select-Object -First 1
+
+while ($true) {
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+
+    try {
+        $g.CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+    } catch {
+        Start-Sleep -Milliseconds 500
+        $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+        continue
+    }
+
+    $ms = New-Object System.IO.MemoryStream
+    $bmp.Save($ms, $jpegCodec, $encParams)
+    $bytes = $ms.ToArray()
+    $ms.Dispose()
+
+    $lenBuf = [System.BitConverter]::GetBytes([int32]$bytes.Length)
+    $rawOut.Write($lenBuf, 0, 4)
+    $rawOut.Write($bytes, 0, $bytes.Length)
+    $rawOut.Flush()
+
+    $sw.Stop()
+    $sleep = $intervalMs - $sw.ElapsedMilliseconds
+    if ($sleep -gt 0) { Start-Sleep -Milliseconds $sleep }
+}
+
+$g.Dispose()
+$bmp.Dispose()
+`;
+
 export interface ScreenOptions {
   fps: number;
-  quality: number; // 1–100, JPEG quality
+  quality: number;
 }
 
 export type FrameCallback = (jpeg: Buffer) => void;
 
 export class ScreenService {
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private ps: ChildProcess | null = null;
+  private scriptPath: string;
+  private frameCallback: FrameCallback | null = null;
+  private readBuf = Buffer.alloc(0);
+  private frameCount = 0;
+
+  constructor() {
+    this.scriptPath = join(process.cwd(), '.screen-capture.ps1');
+  }
 
   start(onFrame: FrameCallback, opts: ScreenOptions = { fps: 10, quality: 70 }): void {
     this.stop();
-    const intervalMs = Math.max(33, Math.round(1000 / opts.fps)); // cap at ~30fps
+    this.frameCallback = onFrame;
+    this.readBuf = Buffer.alloc(0);
+    this.frameCount = 0;
 
-    let monitor: Monitor;
+    const fps     = Math.min(30, Math.max(1, opts.fps));
+    const quality = Math.min(95, Math.max(20, opts.quality));
+
+    slog(`Started — target ${fps} fps, quality ${quality} (persistent GDI mode)`);
+
     try {
-      const monitors = Monitor.all();
-      if (!monitors.length) {
-        slog('ERROR: No monitors found — is this an interactive session?');
-        return;
-      }
-      monitor = monitors[0]; // primary monitor
-      slog(`Started — ${opts.fps}fps quality:${opts.quality} monitor:${monitor.width}x${monitor.height}`);
-    } catch (err) {
-      slog(`ERROR: Failed to initialise monitor capture: ${err}`);
-      return;
-    }
+      writeFileSync(this.scriptPath, PS_CAPTURE_SCRIPT, { encoding: 'utf-8' });
 
-    let frameCount = 0;
-    const capture = async () => {
-      try {
-        const image = monitor.captureImageSync();
-        // node-screenshots types incorrectly declare the quality param as boolean;
-        // the runtime function accepts a number — suppress the type error.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const jpeg: Buffer = await (image as any).toJpeg(opts.quality);
-        frameCount++;
-        if (frameCount === 1 || frameCount % 100 === 0) {
-          slog(`Frame #${frameCount} — ${jpeg.length} bytes`);
+      this.ps = spawn('powershell', [
+        '-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-File', this.scriptPath,
+        '-fps',     String(fps),
+        '-quality', String(quality),
+      ], { stdio: ['ignore', 'pipe', 'pipe'] });
+
+      this.ps.stdout!.on('data', (chunk: Buffer) => this.handleData(chunk));
+
+      this.ps.stderr!.on('data', (d: Buffer) => {
+        slog('PS stderr: ' + d.toString().trim());
+      });
+
+      this.ps.on('exit', (code) => {
+        if (this.frameCallback) {
+          // Only log + restart if we're still supposed to be running
+          slog(`Capture process exited (${code}) — restarting in 2 s`);
+          setTimeout(() => {
+            if (this.frameCallback) this.start(this.frameCallback, opts);
+          }, 2000);
         }
-        onFrame(jpeg);
-      } catch (err) {
-        slog(`ERROR capturing frame #${frameCount}: ${err}`);
-      }
-    };
+      });
 
-    capture();
-    this.timer = setInterval(capture, intervalMs);
+    } catch (err) {
+      slog('ERROR starting capture process: ' + err);
+    }
+  }
+
+  private handleData(chunk: Buffer): void {
+    this.readBuf = Buffer.concat([this.readBuf, chunk]);
+
+    while (this.readBuf.length >= 4) {
+      const frameLen = this.readBuf.readUInt32LE(0);
+
+      if (frameLen <= 0 || frameLen > 10_000_000) {
+        slog(`WARN: bad frame length ${frameLen} — resetting buffer`);
+        this.readBuf = Buffer.alloc(0);
+        break;
+      }
+
+      if (this.readBuf.length < 4 + frameLen) break;
+
+      const frame = Buffer.from(this.readBuf.subarray(4, 4 + frameLen));
+      this.readBuf = this.readBuf.subarray(4 + frameLen);
+
+      this.frameCount++;
+      if (this.frameCount === 1 || this.frameCount % 100 === 0) {
+        slog(`Frame #${this.frameCount} — ${frame.length} bytes`);
+      }
+
+      this.frameCallback?.(frame);
+    }
   }
 
   stop(): void {
-    if (this.timer !== null) {
-      clearInterval(this.timer);
-      this.timer = null;
+    this.frameCallback = null;
+    if (this.ps) {
+      try { this.ps.kill(); } catch { /* ignore */ }
+      this.ps = null;
       slog('Stopped');
     }
   }
 
   isRunning(): boolean {
-    return this.timer !== null;
+    return this.ps !== null;
   }
 }

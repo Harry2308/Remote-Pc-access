@@ -92,12 +92,12 @@ After it finishes, you only need to edit `.env` on the PC and start the service 
 **Test it (from this laptop):**
 ```bash
 # Replace with your PC's local IP
-ssh unger@192.168.0.137
-```
+`ssh unger@192.168.0.137
+````
 
 ```bash
-wakeonlan b4:2e:99:4c:35:8f
-```
+```wakeonlan b4:2e:99:4c:35:8f
+``````
 
 ```bash
 wakeonlan b4:2e:99:4c:35:8f && sleep 30 && ssh unger@192.168.0.137

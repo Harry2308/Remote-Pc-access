@@ -1,6 +1,7 @@
 import { Server as HttpServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { IncomingMessage } from 'http';
+import net from 'net';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import type { SysInfo } from '../types/sysinfo';
@@ -61,6 +62,7 @@ export class TunnelService {
       else if (url.startsWith('/screen'))    this.handleScreenClient(ws, req);
       else if (url.startsWith('/sysinfo'))   this.handleSysinfoClient(ws, req);
       else if (url.startsWith('/wol-agent')) this.handleWolAgentConnection(ws, req);
+      else if (url.startsWith('/vnc'))       this.handleVncClient(ws, req);
       else ws.close(1008, 'Unknown endpoint');
     });
 
@@ -191,7 +193,7 @@ export class TunnelService {
     this.sendToAgent({ type: 'screen.start', fps: this.screenFps, quality: this.screenQuality });
     console.log(`[tunnel] Screen client connected — ${this.screenFps}fps q:${this.screenQuality}`);
 
-    // Client can send JSON control messages to change FPS/quality live
+    // Client can send JSON control messages (settings or input events)
     ws.on('message', (raw: Buffer) => {
       try {
         const msg = JSON.parse(raw.toString()) as AgentMessage;
@@ -199,6 +201,8 @@ export class TunnelService {
           if (typeof msg.fps     === 'number') this.screenFps     = msg.fps;
           if (typeof msg.quality === 'number') this.screenQuality = msg.quality;
           this.sendToAgent({ type: 'screen.start', fps: this.screenFps, quality: this.screenQuality });
+        } else if (msg.type === 'input.mouse' || msg.type === 'input.key') {
+          this.sendToAgent(msg);
         }
       } catch { /* ignore non-JSON */ }
     });
@@ -304,6 +308,44 @@ export class TunnelService {
     } catch (err) {
       console.error('[tunnel] Failed to parse agent message:', err);
     }
+  }
+
+  // ─── VNC WebSocket-to-TCP proxy ─────────────────────────────────────────────
+
+  private handleVncClient(ws: WebSocket, req: IncomingMessage): void {
+    if (!this.authoriseClient(ws, req)) return;
+
+    const pcHost = process.env.PC_HOST;
+    if (!pcHost) { ws.close(1011, 'PC_HOST not configured'); return; }
+
+    const tcp = net.createConnection(5900, pcHost);
+
+    tcp.on('connect', () => {
+      console.log(`[tunnel] VNC TCP connected to ${pcHost}:5900`);
+    });
+
+    tcp.on('data', (data: Buffer) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(data);
+    });
+
+    tcp.on('error', (err) => {
+      console.error('[tunnel] VNC TCP error:', err.message);
+      if (ws.readyState === WebSocket.OPEN) ws.close(1011, 'VNC TCP error');
+    });
+
+    tcp.on('close', () => {
+      if (ws.readyState === WebSocket.OPEN) ws.close(1000, 'VNC TCP closed');
+    });
+
+    ws.on('message', (data: Buffer) => {
+      if (tcp.writable) tcp.write(data);
+    });
+
+    ws.on('close', () => { tcp.destroy(); });
+    ws.on('error', (err) => {
+      console.error('[tunnel] VNC WS error:', err);
+      tcp.destroy();
+    });
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────────

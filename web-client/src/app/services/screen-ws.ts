@@ -65,6 +65,13 @@ export class ScreenWsService implements OnDestroy {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sendInput(payload: Record<string, any>): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(payload));
+    }
+  }
+
   disconnect(): void {
     this.ws?.close();
     this.ws = null;

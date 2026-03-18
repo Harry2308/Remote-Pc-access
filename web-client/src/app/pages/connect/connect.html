@@ -1,0 +1,82 @@
+<div class="connect-page">
+
+  <!-- Status card -->
+  <mat-card class="status-card">
+    <mat-card-content>
+
+      <div class="status-row">
+        <!-- Icon -->
+        <div class="status-icon" [ngClass]="status">
+          <mat-spinner *ngIf="status === 'checking' || status === 'connecting'" diameter="40"></mat-spinner>
+          <mat-icon *ngIf="status === 'offline'"       class="icon-offline">power_off</mat-icon>
+          <mat-icon *ngIf="status === 'waking'"        class="icon-waking">power_settings_new</mat-icon>
+          <mat-icon *ngIf="status === 'vnc-connected'" class="icon-vnc">desktop_windows</mat-icon>
+          <mat-icon *ngIf="status === 'agent-ready'"   class="icon-online">check_circle</mat-icon>
+        </div>
+
+        <!-- Message -->
+        <div class="status-info">
+          <div class="status-label">{{ statusMessage }}</div>
+
+          <!-- Countdown during waking -->
+          <div class="countdown" *ngIf="status === 'waking'">
+            Boot in {{ wakeCountdown }}s
+          </div>
+        </div>
+      </div>
+
+      <!-- Progress bar during waking -->
+      <mat-progress-bar
+        *ngIf="status === 'waking'"
+        mode="determinate"
+        [value]="wakeProgress"
+        class="wake-bar">
+      </mat-progress-bar>
+
+      <!-- Action buttons -->
+      <div class="actions" *ngIf="status === 'offline'">
+        <button mat-raised-button color="primary" (click)="wakeUp()">
+          <mat-icon>power_settings_new</mat-icon>
+          Wake Up PC
+        </button>
+        <button mat-stroked-button (click)="connectNow()" class="connect-btn">
+          <mat-icon>desktop_windows</mat-icon>
+          Connect via VNC
+        </button>
+      </div>
+
+      <div class="actions" *ngIf="status === 'waking'">
+        <button mat-stroked-button (click)="connectNow()">
+          <mat-icon>skip_next</mat-icon>
+          Skip wait &amp; try VNC now
+        </button>
+      </div>
+
+      <div class="actions" *ngIf="status === 'agent-ready'">
+        <button mat-raised-button color="primary" (click)="goToDashboard()">
+          <mat-icon>dashboard</mat-icon>
+          Go to Dashboard
+        </button>
+        <button mat-stroked-button (click)="connectNow()">
+          <mat-icon>desktop_windows</mat-icon>
+          Connect via VNC
+        </button>
+      </div>
+
+    </mat-card-content>
+  </mat-card>
+
+  <!-- Dashboard shortcut when VNC is active -->
+  <div class="vnc-topbar" *ngIf="status === 'vnc-connected'">
+    <span class="vnc-status"><mat-icon>desktop_windows</mat-icon> VNC Connected</span>
+    <button mat-stroked-button (click)="goToDashboard()">
+      <mat-icon>dashboard</mat-icon> Go to Dashboard
+    </button>
+  </div>
+
+  <!-- VNC viewer -->
+  <div class="vnc-wrapper" [class.visible]="isVncVisible">
+    <div #vncContainer class="vnc-container"></div>
+  </div>
+
+</div>
