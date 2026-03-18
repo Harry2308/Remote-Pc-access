@@ -233,9 +233,13 @@ export class TunnelService {
   // ─── Route messages from agent → clients ───────────────────────────────────
 
   private routeAgentBinaryFrame(frame: Buffer): void {
-    if (this.screenClientWs?.readyState === WebSocket.OPEN) {
-      this.screenClientWs.send(frame);
-    }
+    if (this.screenClientWs?.readyState !== WebSocket.OPEN) return;
+    // Drop frame if the browser client's send buffer is backed up (> 512 KB).
+    // This prevents TCP congestion from piling up stale frames.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buffered: number = (this.screenClientWs as any).bufferedAmount ?? 0;
+    if (buffered > 512 * 1024) return;
+    this.screenClientWs.send(frame);
   }
 
   private routeAgentMessage(raw: string): void {

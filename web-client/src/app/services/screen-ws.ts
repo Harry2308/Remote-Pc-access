@@ -11,14 +11,16 @@ export interface ScreenSettings {
 @Injectable({ providedIn: 'root' })
 export class ScreenWsService implements OnDestroy {
   private ws: WebSocket | null = null;
-  private prevObjectUrl: string | null = null;
 
-  readonly frame$     = new Subject<string>();   // revocable object URL
+  // Emits decoded ImageBitmap objects — caller must call .close() after drawing
+  readonly frame$     = new Subject<ImageBitmap>();
   readonly connected$ = new Subject<boolean>();
-  readonly fps$       = new Subject<number>();    // actual measured fps
+  readonly fps$       = new Subject<number>();
 
   private frameCount  = 0;
   private fpsTimer: ReturnType<typeof setInterval> | null = null;
+  // Prevent queuing frames when the previous is still decoding
+  private decoding    = false;
 
   constructor(private auth: AuthService) {}
 
@@ -31,31 +33,25 @@ export class ScreenWsService implements OnDestroy {
     this.ws = new WebSocket(url);
     this.ws.binaryType = 'arraybuffer';
 
-    this.ws.onopen  = () => {
-      this.connected$.next(true);
-      this.startFpsMeter();
-    };
-    this.ws.onclose = () => {
-      this.connected$.next(false);
-      this.stopFpsMeter();
-      this.ws = null;
-    };
-    this.ws.onerror = () => {
-      this.connected$.next(false);
-      this.stopFpsMeter();
-    };
+    this.ws.onopen  = () => { this.connected$.next(true);  this.startFpsMeter(); };
+    this.ws.onclose = () => { this.connected$.next(false); this.stopFpsMeter(); this.ws = null; };
+    this.ws.onerror = () => { this.connected$.next(false); this.stopFpsMeter(); };
 
     this.ws.onmessage = (event: MessageEvent) => {
       if (!(event.data instanceof ArrayBuffer)) return;
+
+      // Drop frame if still decoding the previous one — avoids queuing lag
+      if (this.decoding) return;
+      this.decoding = true;
+
       const blob = new Blob([event.data], { type: 'image/jpeg' });
-      const url  = URL.createObjectURL(blob);
-
-      // Revoke the previous URL to free memory
-      if (this.prevObjectUrl) URL.revokeObjectURL(this.prevObjectUrl);
-      this.prevObjectUrl = url;
-
-      this.frameCount++;
-      this.frame$.next(url);
+      createImageBitmap(blob)
+        .then((bitmap) => {
+          this.frameCount++;
+          this.frame$.next(bitmap);
+        })
+        .catch(() => { /* malformed frame — ignore */ })
+        .finally(() => { this.decoding = false; });
     };
   }
 
@@ -76,10 +72,6 @@ export class ScreenWsService implements OnDestroy {
     this.ws?.close();
     this.ws = null;
     this.stopFpsMeter();
-    if (this.prevObjectUrl) {
-      URL.revokeObjectURL(this.prevObjectUrl);
-      this.prevObjectUrl = null;
-    }
   }
 
   private startFpsMeter(): void {

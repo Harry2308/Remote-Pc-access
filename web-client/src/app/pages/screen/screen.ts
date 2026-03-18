@@ -63,7 +63,7 @@ export class Screen implements OnInit, AfterViewInit, OnDestroy {
   // ── Screen-capture state ───────────────────────────────────────────────────
   connected   = false;
   actualFps   = 0;
-  fps         = 15;
+  fps         = 20;
   quality     = 70;
   fullscreen  = false;
   latencyMs   = 0;
@@ -247,24 +247,24 @@ export class Screen implements OnInit, AfterViewInit, OnDestroy {
 
   // ── Screen capture ─────────────────────────────────────────────────────────
 
-  private drawFrame(url: string): void {
-    const sentTs = this.lastFrameTs;
-    this.lastFrameTs = performance.now();
-    if (sentTs > 0) this.latencyMs = Math.round(this.lastFrameTs - sentTs);
+  private drawFrame(bitmap: ImageBitmap): void {
+    const now = performance.now();
+    if (this.lastFrameTs > 0) this.latencyMs = Math.round(now - this.lastFrameTs);
+    this.lastFrameTs = now;
 
     if (!this.ctx && this.canvasRef?.nativeElement) {
       this.ctx = this.canvasRef.nativeElement.getContext('2d')!;
     }
-    if (!this.ctx) return;
+    if (!this.ctx) { bitmap.close(); return; }
 
-    const img = new Image();
-    img.onload = () => {
-      const canvas = this.canvasRef.nativeElement;
-      if (canvas.width  !== img.width)  canvas.width  = img.width;
-      if (canvas.height !== img.height) canvas.height = img.height;
-      this.ctx.drawImage(img, 0, 0);
-    };
-    img.src = url;
+    const canvas = this.canvasRef.nativeElement;
+    // Only resize canvas when resolution actually changes (resize clears GPU buffer)
+    if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+      canvas.width  = bitmap.width;
+      canvas.height = bitmap.height;
+    }
+    this.ctx.drawImage(bitmap, 0, 0);
+    bitmap.close(); // free GPU memory immediately
   }
 
   private scale(event: MouseEvent): { x: number; y: number } {
